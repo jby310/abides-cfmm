@@ -213,7 +213,7 @@ agent_count += num_noise
 agent_types.extend(['NoiseAgent'])
 
 # 3) Value Agents
-num_value = 100
+num_value = 200
 agents.extend([ValueAgent(id=j,
                           name="Value Agent {}".format(j),
                           type="ValueAgent",
@@ -323,6 +323,32 @@ agents.extend(execution_agents)
 agent_types.extend("ExecutionAgent")
 agent_count += 1
 
+
+# 导入SnapshotAgent
+from agent.SnapshotAgent import SnapshotAgent
+
+# 在parser中添加参数
+parser.add_argument('--snapshot-agent',
+                    action='store_true',
+                    help='Enable SnapshotAgent to record market data')
+parser.add_argument('--snapshot-freq',
+                    type=str,
+                    default='1S',
+                    help='Snapshot frequency (e.g., 1S, 100ms)')
+
+# 在代理配置部分（Execution Agent之前）添加：
+# 7) Snapshot Agent
+snapshot_agent_id = agent_count
+agents.extend([SnapshotAgent(
+    id=snapshot_agent_id,
+    name="SNAPSHOT_AGENT",
+    type="SnapshotAgent",
+    symbol=symbol,
+    log_orders=True,
+    random_state=np.random.RandomState(seed=np.random.randint(low=0, high=2**32, dtype='uint64'))
+)])
+agent_types.extend("SnapshotAgent")
+agent_count += 1
 
 
 ########################################################################################################################

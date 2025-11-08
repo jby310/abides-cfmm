@@ -568,8 +568,9 @@ class Kernel:
         return new_mid_price
             
     # 执行提取（可多次运行，自动添加新列）
-    stream_path = r"log\rmsc03_two_hour\EXCHANGE_AGENT.bz2"
-    book_path = r"log\rmsc03_two_hour\ORDERBOOK_ABM_FULL.bz2"
+    from config.rmsc04 import args
+    stream_path = rf"log\{args.log_dir}\EXCHANGE_AGENT.bz2"
+    book_path = rf"log\{args.log_dir}\ORDERBOOK_{args.ticker}_FULL.bz2"
     # 第一次运行用默认列名，后续可自定义或自动加后缀
     new_mid_price = extract_mid_price_to_csv(stream_path, book_path, output_mid_price_path)
     return new_mid_price

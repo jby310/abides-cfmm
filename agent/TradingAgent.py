@@ -273,7 +273,7 @@ class TradingAgent(FinancialAgent):
 
   # Used by any Trading Agent subclass to query the current spread for a symbol.
   # This activity is not logged.
-  def getCurrentSpread (self, symbol, depth=1):
+  def getCurrentSpread (self, symbol, depth=10):
     self.sendMessage(self.exchangeID, Message({ "msg" : "QUERY_SPREAD", "sender": self.id,
                                                 "symbol" : symbol, "depth" : depth }))
 
