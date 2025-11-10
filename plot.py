@@ -75,79 +75,96 @@ def process_volume_events(df):
     return volume_data_min
 
 
-def plot_comparison_metrics(data_dict):
-    """绘制两个数据源的对比图表"""
-    # 创建画布和子图
-    fig, axes = plt.subplots(3, 1, figsize=(14, 18), sharex=True)
-    fig.suptitle('Market Metrics Comparison (rmsc03 vs rmsc04)', fontsize=16)
+def plot_mid_price_comparison(merged, ax):
+    """绘制中间价预测与原始值对比图"""
+    # 预测值曲线
+    ax.plot(merged.index, merged['mid_price_1_pred'], label='Predicted', color='blue', linewidth=1.5)
+    # 原始值曲线
+    ax.plot(merged.index, merged['mid_price_1_origin'], label='Original', color='red', linewidth=1.5, alpha=0.8)
+
+    # 图表美化
+    ax.set_xlabel('Timestamp', fontsize=10)
+    ax.set_ylabel('Mid Price', fontsize=10)
+    ax.set_title('Predicted vs Original Mid Price', fontsize=12)
+    ax.legend(fontsize=10)
+    ax.tick_params(axis='x', rotation=45)
+    ax.grid(linestyle='--', alpha=0.3)
+
+
+def plot_comparison_metrics(data_dict, merged):
+    """绘制所有对比图表，使用2x2子图布局"""
+    # 创建2x2子图
+    fig, axes = plt.subplots(2, 2, figsize=(20, 14), sharex=False)
+    fig.suptitle('Market Metrics & Price Comparison', fontsize=16)
     
     # 定义两个数据源的样式
     styles = {
         'rmsc03': {'color': 'blue', 'marker': 'o', 'alpha': 0.7},
         'rmsc04': {'color': 'orange', 'marker': 's', 'alpha': 0.7}
     }
+    bar_width = 0.3/24/60  # 柱状图宽度
     
-    # 1. 流动性对比图表
+    # 1. 流动性对比图表 (0,0位置)
+    ax1 = axes[0, 0]
     for name, data in data_dict.items():
         liq = data['liquidity']
         if not liq.empty:
-            # axes[0].plot(liq.index, liq['bid_liquidity'], 
-            #              label=f'{name} Bid Liquidity', **styles[name])
-            # axes[0].plot(liq.index, liq['ask_liquidity'], 
-            #              label=f'{name} Ask Liquidity', linestyle='--',** styles[name])
-            axes[0].plot(liq.index, liq['min_liquidity'], 
-                         label=f'{name} Min Liquidity', linestyle=':', **styles[name])
+            ax1.plot(liq.index, liq['min_liquidity'], 
+                     label=f'{name} Min Liquidity', linestyle=':', **styles[name])
     
-    axes[0].set_ylabel('Liquidity (Shares)', fontsize=12)
-    axes[0].legend(fontsize=10, loc='upper left')
-    axes[0].grid(alpha=0.3)
-    axes[0].set_title('Liquidity Comparison', fontsize=14)
+    ax1.set_ylabel('Liquidity (Shares)', fontsize=10)
+    ax1.legend(fontsize=8, loc='upper left')
+    ax1.grid(alpha=0.3)
+    ax1.set_title('Liquidity Comparison', fontsize=12)
+    ax1.xaxis.set_major_formatter(mdates.DateFormatter('%H:%M'))
+    ax1.tick_params(axis='x', rotation=45)
     
-    # 2. 价差对比图表
-    bar_width = 0.3/24/60  # 缩小柱状图宽度避免重叠
+    # 2. 价差对比图表 (0,1位置)
+    ax2 = axes[0, 1]
     for i, (name, data) in enumerate(data_dict.items()):
         spread = data['spread']
         if not spread.empty:
-            # 偏移位置避免柱状图重叠
-            axes[1].bar(spread.index + pd.Timedelta(minutes=i*2), 
-                        spread['spread'], width=bar_width,
-                        label=f'{name} Average Spread', color=styles[name]['color'], 
-                        alpha=styles[name]['alpha'])
+            ax2.bar(spread.index + pd.Timedelta(minutes=i*2), 
+                    spread['spread'], width=bar_width,
+                    label=f'{name} Average Spread', color=styles[name]['color'], 
+                    alpha=styles[name]['alpha'])
     
-    axes[1].set_ylabel('Spread ($)', fontsize=12)
-    axes[1].legend(fontsize=10, loc='upper left')
-    axes[1].grid(alpha=0.3)
-    axes[1].set_title('Spread Comparison', fontsize=14)
+    ax2.set_ylabel('Spread ($)', fontsize=10)
+    ax2.legend(fontsize=8, loc='upper left')
+    ax2.grid(alpha=0.3)
+    ax2.set_title('Spread Comparison', fontsize=12)
+    ax2.xaxis.set_major_formatter(mdates.DateFormatter('%H:%M'))
+    ax2.tick_params(axis='x', rotation=45)
     
-    # 3. 交易量对比图表（双轴）
+    # 3. 交易量对比图表 (1,0位置)
+    ax3 = axes[1, 0]
     for name, data in data_dict.items():
         volume = data['volume']
         if not volume.empty:
             # 左侧轴：累积交易量
-            axes[2].plot(volume.index, volume['cumulative_volume'],
-                         label=f'{name} Cumulative Volume',** styles[name])
+            ax3.plot(volume.index, volume['cumulative_volume'],
+                     label=f'{name} Cumulative Volume',** styles[name])
             
-            # 右侧轴：每分钟交易量（共享一个副轴）
-            if not hasattr(axes[2], 'twin_ax'):
-                axes[2].twin_ax = axes[2].twinx()
-            axes[2].twin_ax.bar(volume.index + pd.Timedelta(minutes=1 if name == 'rmsc04' else 0),
-                                volume['volume'], width=bar_width,
-                                label=f'{name} Volume per Minute', 
-                                color=styles[name]['color'], alpha=0.4)
+            # 右侧轴：每分钟交易量
+            if not hasattr(ax3, 'twin_ax'):
+                ax3.twin_ax = ax3.twinx()
+            ax3.twin_ax.bar(volume.index + pd.Timedelta(minutes=1 if name == 'rmsc04' else 0),
+                            volume['volume'], width=bar_width,
+                            label=f'{name} Volume per Minute', 
+                            color=styles[name]['color'], alpha=0.4)
     
-    axes[2].set_ylabel('Cumulative Volume (Shares)', fontsize=12)
-    axes[2].twin_ax.set_ylabel('Volume per Minute (Shares)', fontsize=12)
-    axes[2].legend(fontsize=10, loc='upper left')
-    axes[2].twin_ax.legend(fontsize=10, loc='upper right')
-    axes[2].grid(alpha=0.3)
-    axes[2].set_title('Volume Comparison', fontsize=14)
+    ax3.set_ylabel('Cumulative Volume (Shares)', fontsize=10)
+    ax3.twin_ax.set_ylabel('Volume per Minute (Shares)', fontsize=10)
+    ax3.legend(fontsize=8, loc='upper left')
+    ax3.twin_ax.legend(fontsize=8, loc='upper right')
+    ax3.grid(alpha=0.3)
+    ax3.set_title('Volume Comparison', fontsize=12)
+    ax3.xaxis.set_major_formatter(mdates.DateFormatter('%H:%M'))
+    ax3.tick_params(axis='x', rotation=45)
     
-    # 设置x轴格式
-    for ax in axes:
-        ax.xaxis.set_major_formatter(mdates.DateFormatter('%H:%M'))
-        ax.tick_params(axis='x', rotation=45)
-    
-    axes[-1].set_xlabel('Time', fontsize=12)
+    # 4. 中间价对比图表 (1,1位置)
+    plot_mid_price_comparison(merged, axes[1, 1])
+    axes[1, 1].xaxis.set_major_formatter(mdates.DateFormatter('%H:%M'))
     
     # 调整布局并保存图表
     plt.tight_layout(rect=[0, 0, 1, 0.96])
@@ -156,13 +173,13 @@ def plot_comparison_metrics(data_dict):
 
 
 if __name__ == "__main__":
-    # 定义两个数据源路径
+    # 定义数据源路径
     data_paths = {
         'rmsc03': r'log\rmsc03_two_hour\SNAPSHOT_AGENT.bz2',
         'rmsc04': r'log\rmsc04_two_hour\SNAPSHOT_AGENT.bz2'
     }
     
-    # 批量处理数据
+    # 批量处理市场指标数据
     data_dict = {}
     for name, path in data_paths.items():
         raw_data = load_and_preprocess_data(path)
@@ -172,5 +189,20 @@ if __name__ == "__main__":
             'volume': process_volume_events(raw_data)
         }
     
-    # 绘制对比图表
-    plot_comparison_metrics(data_dict)
+    # 处理中间价数据
+    origin = pd.read_csv(r'log\rmsc03_two_hour\mid_price.csv')
+    pred = pd.read_csv(r'log\rmsc04_two_hour\mid_price.csv')
+    
+    # 转换时间格式并设置为索引
+    pred['timestamp'] = pd.to_datetime(pred['timestamp'])
+    pred.set_index('timestamp', inplace=True)
+    
+    origin['timestamp'] = pd.to_datetime(origin['timestamp'])
+    origin.set_index('timestamp', inplace=True)
+    
+    # 外连接合并并排序
+    merged = pred.join(origin, lsuffix='_pred', rsuffix='_origin', how='outer')
+    merged.sort_index(inplace=True)
+    
+    # 绘制所有对比图表
+    plot_comparison_metrics(data_dict, merged)
