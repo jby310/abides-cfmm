@@ -170,13 +170,22 @@ class CFMMAgent(ExchangeAgent):
             
             return quantity, execution_price, fee_amount
     
+    def depth_at_1pct(self):
+        """Depth: 把价格推离 1 % 所需交易量（无手续费理论值）"""
+        if self.x == 0:
+            return 0.0
+        dx_bid = self.x * (1.0 / 0.99 - 1.0)   # 压价 1 %
+        dx_ask = self.x * (1.0 - 1.0 / 1.01)   # 抬价 1 %
+        return min(dx_bid, dx_ask)
+    
     def get_market_data(self, levels=1):
         """Get current market data (similar to CLOB but for CFMM)"""
         bid_price, ask_price = self.calculate_bid_ask()
         
-        # For CFMM, depth is theoretical based on price impact
-        bid_depth = self.calculate_trade_output(10000, False)  # Depth for 10k units
-        ask_depth = self.calculate_trade_output(10000, True)   # Depth for 10k units
+        # # For CFMM, depth is theoretical based on price impact
+        # bid_depth = self.calculate_trade_output(10000, False)  # Depth for 10k units
+        # ask_depth = self.calculate_trade_output(10000, True)   # Depth for 10k units
+        bid_depth = ask_depth = self.depth_at_1pct()
         
         return {
             'bids': [(bid_price, bid_depth)] if levels > 0 else [],

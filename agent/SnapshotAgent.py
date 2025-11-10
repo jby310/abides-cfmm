@@ -51,6 +51,18 @@ class SnapshotAgent(TradingAgent):
         # 记录当前时间用于后续处理响应
         self.last_snapshot_time = currentTime
 
+        # 找到 CFMM
+        from agent.CFMMAgent import CFMMAgent
+        from message.Message import Message
+        self.cfmm_id = self.kernel.findAgentByType(CFMMAgent)
+        if self.cfmm_id:
+            self.sendMessage(self.cfmm_id, Message({
+                "msg": "CFMM_SUBSCRIPTION_REQUEST",
+                "sender": self.id,
+                "symbol": self.symbol,
+                "freq": 0          # 0 = 每有更新就推送
+            }))
+
     def receiveMessage(self, currentTime, msg):
         super().receiveMessage(currentTime, msg)
         
@@ -106,6 +118,41 @@ class SnapshotAgent(TradingAgent):
             self.logEvent('VOLUME', {
                 'timestamp': currentTime,
                 'volume': volume
+            })
+
+        # —— 新增 CFMM 指标记录 —— 
+        if msg.body['msg'] == 'CFMM_MARKET_DATA':
+            data = msg.body['data']
+            bids, asks = data['bids'], data['asks']
+            if bids and asks:
+                bid_p, bid_v = bids[0]
+                ask_p, ask_v = asks[0]
+                spread = ask_p - bid_p
+                mid  = (ask_p + bid_p) / 2
+                spread_bps = spread / mid * 10000
+                # 1 % 深度（使用上一篇回复的准确公式）
+                dx_1pct = self.x_reserve * (1/0.99 - 1) if hasattr(self, 'x_reserve') else 0
+                # 也可直接从 data['pool_reserves'] 取
+                x_reserve, y_reserve = data['pool_reserves']
+                dx_1pct = x_reserve * (1/0.99 - 1)
+                depth = min(dx_1pct, x_reserve * (1 - 1/1.01))
+
+                self.logEvent('CFMM_SPREAD', {
+                    'timestamp': currentTime,
+                    'spread_bps': spread_bps,
+                    'best_bid': bid_p,
+                    'best_ask': ask_p
+                })
+                self.logEvent('CFMM_DEPTH_1PCT', {
+                    'timestamp': currentTime,
+                    'depth_eth': depth
+                })
+
+            # 成交量（最近 1 秒）
+            volume = self.kernel.agents[self.cfmm_id].get_transacted_volume('1s')
+            self.logEvent('CFMM_VOLUME', {
+                'timestamp': currentTime,
+                'volume_eth': volume
             })
 
     def getWakeFrequency(self):

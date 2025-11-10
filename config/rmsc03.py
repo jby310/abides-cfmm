@@ -390,7 +390,8 @@ kernel.runner(agents=agents,
               agentLatencyModel=latency_model,
               defaultComputationDelay=defaultComputationDelay,
               oracle=oracle,
-              log_dir=args.log_dir)
+              log_dir=args.log_dir,
+              output_mid_price_path="log/rmsc03_two_hour/mid_price.csv")
 
 simulation_end_time = dt.datetime.now()
 print("Simulation End Time: {}".format(simulation_end_time))
