@@ -9,7 +9,7 @@ from util.util import log_print
 
 class Kernel:
 
-  def __init__(self, kernel_name, random_state = None):
+  def __init__(self, kernel_name, random_state = None, log_dir=None, ticker=None):
     # kernel_name is for human readers only.
     self.name = kernel_name
     self.random_state = random_state
@@ -42,6 +42,9 @@ class Kernel:
     # logging should go only to the agent's individual log.  This
     # is for things like "final position value" and such.
     self.summaryLog = []
+
+    self.log_dir = log_dir
+    self.ticker = ticker
 
     log_print ("Kernel initialized: {}", self.name)
 
@@ -568,9 +571,8 @@ class Kernel:
         return new_mid_price
             
     # 执行提取（可多次运行，自动添加新列）
-    from config.rmsc04 import args
-    stream_path = rf"log\{args.log_dir}\EXCHANGE_AGENT.bz2"
-    book_path = rf"log\{args.log_dir}\ORDERBOOK_{args.ticker}_FULL.bz2"
+    stream_path = rf"log\{self.log_dir}\EXCHANGE_AGENT.bz2"
+    book_path = rf"log\{self.log_dir}\ORDERBOOK_{self.ticker}_FULL.bz2"
     # 第一次运行用默认列名，后续可自定义或自动加后缀
     new_mid_price = extract_mid_price_to_csv(stream_path, book_path, output_mid_price_path)
     return new_mid_price

@@ -175,7 +175,7 @@ class CFMMAgent(ExchangeAgent):
         if self.x == 0:
             return 0.0
         dx_bid = self.x * (1.0 / 0.99 - 1.0)   # 压价 1 %
-        dx_ask = self.x * (1.0 - 1.0 / 1.01)   # 抬价 1 %
+        dx_ask = self.x * (1.0 - 1.0 / 1.01)   # 抬价 1 % (这里选择x，不选y是为了保持单位一致)
         return min(dx_bid, dx_ask)
     
     def get_market_data(self, levels=1):

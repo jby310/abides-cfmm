@@ -354,8 +354,10 @@ agent_count += 1
 ########################################################################################################################
 ########################################### KERNEL AND OTHER CONFIG ####################################################
 
-kernel = Kernel("RMSC03 Kernel", random_state=np.random.RandomState(seed=np.random.randint(low=0, high=2 ** 32,
-                                                                                                  dtype='uint64')))
+kernel = Kernel("RMSC03 Kernel", 
+                random_state=np.random.RandomState(seed=np.random.randint(low=0, high=2 ** 32, dtype='uint64')),
+                log_dir=args.log_dir,
+                ticker=args.ticker)
 
 kernelStartTime = historical_date
 kernelStopTime = mkt_close + pd.to_timedelta('00:01:00')
