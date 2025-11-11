@@ -75,12 +75,12 @@ def process_volume_events(df):
     return volume_data_min
 
 
-def plot_mid_price_comparison(merged, ax):
+def plot_mid_price_comparison(merged, ax, styles):
     """绘制中间价预测与原始值对比图"""
     # 预测值曲线
-    ax.plot(merged.index, merged['mid_price_1_pred'], label='Predicted', color='blue', linewidth=1.5)
+    ax.plot(merged.index, merged['mid_price_1_pred'], label='Hybrid', color='blue', linewidth=1.5)
     # 原始值曲线
-    ax.plot(merged.index, merged['mid_price_1_origin'], label='Original', color='red', linewidth=1.5, alpha=0.8)
+    ax.plot(merged.index, merged['mid_price_1_origin'], label='Original', color=styles[name]['color'], linewidth=1.5, alpha=styles[name]['alpha'])
 
     # 图表美化
     ax.set_xlabel('Timestamp', fontsize=10)
@@ -109,8 +109,21 @@ def plot_comparison_metrics(data_dict, merged):
     for name, data in data_dict.items():
         liq = data['liquidity']
         if not liq.empty:
+            # # 显示bid流动性（实线）
+            # ax1.plot(liq.index, liq['bid_liquidity'], 
+            #              label=f'{name} Bid Liquidity', **styles[name])
+            # # 显示ask流动性（虚线）
+            # ax1.plot(liq.index, liq['ask_liquidity'], 
+            #              label=f'{name} Ask Liquidity', linestyle='--',** styles[name])
+            # 显示最小流动性（点线）
             ax1.plot(liq.index, liq['min_liquidity'], 
-                     label=f'{name} Min Liquidity', linestyle=':', **styles[name])
+                         label=f'{name} Min Liquidity', linestyle=':', **styles[name])
+
+
+        # liq = data['liquidity']
+        # if not liq.empty:
+        #     ax1.plot(liq.index, liq['min_liquidity'], 
+        #              label=f'{name} Min Liquidity', linestyle=':', **styles[name])
     
     ax1.set_ylabel('Liquidity (Shares)', fontsize=10)
     ax1.legend(fontsize=8, loc='upper left')
@@ -163,7 +176,7 @@ def plot_comparison_metrics(data_dict, merged):
     ax3.tick_params(axis='x', rotation=45)
     
     # 4. 中间价对比图表 (1,1位置)
-    plot_mid_price_comparison(merged, axes[1, 1])
+    plot_mid_price_comparison(merged, axes[1, 1], styles)
     axes[1, 1].xaxis.set_major_formatter(mdates.DateFormatter('%H:%M'))
     
     # 调整布局并保存图表

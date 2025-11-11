@@ -3,6 +3,7 @@ from message.Message import Message
 from util.util import log_print
 import pandas as pd
 import numpy as np
+import random
 
 class MarketOnlyAgent(TradingAgent):
     """
@@ -10,16 +11,14 @@ class MarketOnlyAgent(TradingAgent):
     Routes orders intelligently between CLOB and CFMM venues
     """
     
-    def __init__(self, id, name, type, symbol, starting_cash=100000,
-                 trade_amount=1000, max_slippage=0.05, 
-                 wake_up_freq='60s', min_trade_size=100,
+    def __init__(self, id, name, type, symbol, starting_cash=100000, 
+                 max_slippage=0.05, wake_up_freq='60s', min_trade_size=100,
                  log_orders=False, random_state=None):
         
         super().__init__(id, name, type, starting_cash=starting_cash,
                          log_orders=log_orders, random_state=random_state)
         
         self.symbol = symbol
-        self.trade_amount = trade_amount  # Amount to trade (in quote currency)
         self.max_slippage = max_slippage  # Maximum acceptable slippage (e.g., 5%)
         self.wake_up_freq = wake_up_freq
         self.min_trade_size = min_trade_size  # Minimum trade size to avoid dust
@@ -40,6 +39,15 @@ class MarketOnlyAgent(TradingAgent):
         # Trading statistics
         self.trade_history = []
         self.venue_preference = {'CLOB': 0, 'CFMM': 0}
+        
+        # 可以在这里设置交易金额的随机范围，比如1到100
+        self.min_trade_amount = 1
+        self.max_trade_amount = 10000
+        self.trade_amount = self.get_random_trade_amount()
+        
+    def get_random_trade_amount(self):
+        # 生成指定范围内的随机整数作为交易金额
+        return random.randint(self.min_trade_amount, self.max_trade_amount)
         
     def kernelStarting(self, startTime):
         super().kernelStarting(startTime)

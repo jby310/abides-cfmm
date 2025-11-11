@@ -12,7 +12,7 @@ class CFMMAgent(ExchangeAgent):
     """
     
     def __init__(self, id, name, type, mkt_open, mkt_close, symbol, 
-                 initial_x=50000, initial_y=50000, fee=0.003, 
+                 initial_k=10000000, fee=0.003, 
                  reset_threshold=0.1, pipeline_delay=40000,
                  computation_delay=1, log_orders=False, random_state=None):
         
@@ -22,17 +22,18 @@ class CFMMAgent(ExchangeAgent):
         
         # CFMM specific parameters
         self.symbol = symbol
-        self.x = initial_x  # Reserve of asset X (e.g., ETH)
-        self.y = initial_y  # Reserve of asset Y (e.g., USDT)
-        self.k = initial_x * initial_y  # Constant product
         self.fee = fee  # Trading fee (0.3%)
         self.reset_threshold = reset_threshold  # Price deviation threshold for reset
         
         # Track initial values for reset
-        self.initial_x = initial_x
-        self.initial_y = initial_y
-        self.initial_k = initial_x * initial_y
+        self.initial_x = np.sqrt(initial_k)
+        self.initial_y = np.sqrt(initial_k)
+        self.initial_k = initial_k
         
+        self.x = self.initial_x  # Reserve of asset X (e.g., ETH)
+        self.y = self.initial_y  # Reserve of asset Y (e.g., USDT)
+        self.k = self.initial_k  # Constant product
+
         # Transaction history for volume calculation
         self.transaction_history = []
         

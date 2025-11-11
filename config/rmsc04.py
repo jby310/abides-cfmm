@@ -123,6 +123,16 @@ parser.add_argument('--fund-vol',
                     default=1e-8,
                     help='Volatility of fundamental time series.'
                     )
+parser.add_argument('-k',
+                    '--initial_k',
+                    type=float,
+                    required=True,  # 若为必填参数则添加，否则移除
+                    default=100000000,  # 可设置默认费率，比如0.3%
+                    help='Initial k value for CFMM Agent (constant product parameter)')
+parser.add_argument('--fee',
+                    type=float,
+                    default=0.003,  # 可设置默认费率，比如0.3%
+                    help='Transaction fee rate for CFMM Agent (e.g., 0.003 for 0.3%%)')
 
 args, remaining_args = parser.parse_known_args()
 
@@ -355,6 +365,8 @@ agents.extend([CFMMAgent(id=agent_count,
                              pipeline_delay=0,
                              computation_delay=0,
                              log_orders=log_orders,
+                             initial_k=args.initial_k,
+                             fee=args.fee,
                              random_state=np.random.RandomState(seed=np.random.randint(low=0, high=2 ** 32, dtype='uint64')))])
 agent_count += num_market_only_agents
 agent_types.extend("CFMMAgent")
