@@ -157,8 +157,31 @@ class MarketOnlyAgent(TradingAgent):
         # Both queries completed, analyze and trade
         self.analyzeMarketsAndTrade(currentTime)
 
+    # def analyzeMarketsAndTrade(self, currentTime):
+    #     """Analyze both markets and execute optimal trade as per Document 3"""
+    #     if not self.clob_data and not self.cfmm_data:
+    #         log_print(f"MarketOnlyAgent {self.id}: No market data available")
+    #         self.state = 'AWAITING_WAKEUP'
+    #         self.setWakeup(currentTime + self.getWakeFrequency())
+    #         return
+            
+    #     # Use fixed trade direction as per Document 3 (not random)
+    #     is_buy_order = self.trade_direction
+    #     action = "BUY" if is_buy_order else "SELL"
+        
+    #     log_print(f"MarketOnlyAgent {self.id}: Planning to {action} {self.trade_amount} worth of {self.symbol}")
+        
+    #     # Compare venues and execute trade following Document 3 logic
+    #     venue_analysis = self.compareVenuesDocument3(is_buy_order)
+        
+    #     if venue_analysis['best_venue'] or venue_analysis['split_trade']:
+    #         self.executeTradeDocument3(currentTime, is_buy_order, venue_analysis)
+    #     else:
+    #         log_print(f"MarketOnlyAgent {self.id}: No suitable venue found within slippage limits")
+    #         self.state = 'AWAITING_WAKEUP'
+    #         self.setWakeup(currentTime + self.getWakeFrequency())
     def analyzeMarketsAndTrade(self, currentTime):
-        """Analyze both markets and execute optimal trade as per Document 3"""
+        """Analyze both markets and execute optimal trade following Document 3 flow chart"""
         if not self.clob_data and not self.cfmm_data:
             log_print(f"MarketOnlyAgent {self.id}: No market data available")
             self.state = 'AWAITING_WAKEUP'
@@ -171,146 +194,169 @@ class MarketOnlyAgent(TradingAgent):
         
         log_print(f"MarketOnlyAgent {self.id}: Planning to {action} {self.trade_amount} worth of {self.symbol}")
         
-        # Compare venues and execute trade following Document 3 logic
-        venue_analysis = self.compareVenuesDocument3(is_buy_order)
-        
-        if venue_analysis['best_venue'] or venue_analysis['split_trade']:
-            self.executeTradeDocument3(currentTime, is_buy_order, venue_analysis)
-        else:
-            log_print(f"MarketOnlyAgent {self.id}: No suitable venue found within slippage limits")
-            self.state = 'AWAITING_WAKEUP'
-            self.setWakeup(currentTime + self.getWakeFrequency())
+        # Execute trade following the detailed flow chart logic
+        self.executeTradeFlowChart(currentTime, is_buy_order)
 
-    def compareVenuesDocument3(self, is_buy_order):
-        """
-        Compare CLOB and CFMM following Document 3 specifications
-        Implements the price comparison logic from Document 3
-        """
-        analysis = {
-            'best_venue': None,
-            'split_trade': False,
-            'clob_best_price': None,
-            'cfmm_best_price': None,
-            'slippage_price': None
-        }
+    def executeTradeFlowChart(self, currentTime, is_buy_order):
+        """Execute trade following the detailed flow chart from experimental design"""
+        self.state = 'EXECUTING_TRADE'
         
-        # Get best prices from both venues
+        remaining_amount = self.trade_amount
+        max_slippage_price = None
+        
+        # Get initial best prices
+        clob_price, cfmm_price = self.getCurrentBestPrices(is_buy_order)
+        
+        # Calculate slippage price based on best available price
+        if is_buy_order:
+            best_price = min([p for p in [clob_price, cfmm_price] if p is not None])
+            max_slippage_price = best_price * (1 + self.max_slippage)
+        else:
+            best_price = max([p for p in [clob_price, cfmm_price] if p is not None])
+            max_slippage_price = best_price * (1 - self.max_slippage)
+        
+        log_print(f"MarketOnlyAgent {self.id}: Best price: {best_price:.4f}, Slippage limit: {max_slippage_price:.4f}")
+        
+        # Main trading loop - continue until all amount is traded or no venues available
+        while remaining_amount > self.min_trade_size:
+            # Get current best prices (they may change after partial execution)
+            clob_price, cfmm_price = self.getCurrentBestPrices(is_buy_order)
+            
+            # Check which venues are available and within slippage limits
+            available_venues = []
+            
+            if clob_price is not None:
+                if is_buy_order:
+                    clob_acceptable = clob_price <= max_slippage_price
+                else:
+                    clob_acceptable = clob_price >= max_slippage_price
+                if clob_acceptable:
+                    available_venues.append(('CLOB', clob_price))
+            
+            if cfmm_price is not None:
+                if is_buy_order:
+                    cfmm_acceptable = cfmm_price <= max_slippage_price
+                else:
+                    cfmm_acceptable = cfmm_price >= max_slippage_price
+                if cfmm_acceptable:
+                    available_venues.append(('CFMM', cfmm_price))
+            
+            if not available_venues:
+                log_print(f"MarketOnlyAgent {self.id}: No venues available within slippage limits")
+                break
+            
+            # Find the best venue (lowest price for buy, highest for sell)
+            if is_buy_order:
+                best_venue, best_price = min(available_venues, key=lambda x: x[1])
+            else:
+                best_venue, best_price = max(available_venues, key=lambda x: x[1])
+            
+            # Calculate how much to trade on this venue
+            trade_amount = self.calculateTradeAmount(best_venue, is_buy_order, best_price, remaining_amount)
+            
+            if trade_amount < self.min_trade_size:
+                log_print(f"MarketOnlyAgent {self.id}: Trade amount {trade_amount} below minimum, skipping")
+                break
+            
+            # Execute trade on the best venue
+            if best_venue == 'CLOB':
+                executed = self.executeCLOBTradeFlowChart(currentTime, is_buy_order, trade_amount, best_price)
+            else:  # CFMM
+                executed = self.executeCFMMTradeFlowChart(currentTime, is_buy_order, trade_amount)
+            
+            if executed:
+                remaining_amount -= trade_amount
+                log_print(f"MarketOnlyAgent {self.id}: Trade executed on {best_venue}, remaining: {remaining_amount:.2f}")
+                
+                # Update prices after trade (simulate market impact)
+                # For CLOB, we assume the best level is consumed and need to refresh
+                # For CFMM, the pool price changes automatically
+                if best_venue == 'CLOB':
+                    # Refresh CLOB data by querying again
+                    self.getCurrentSpread(self.symbol, depth=5)
+            else:
+                log_print(f"MarketOnlyAgent {self.id}: Trade failed on {best_venue}")
+                # Remove this venue from consideration for the next iteration
+                if best_venue == 'CLOB':
+                    self.clob_data = None
+                else:
+                    self.cfmm_data = None
+        
+        if remaining_amount < self.trade_amount:
+            log_print(f"MarketOnlyAgent {self.id}: Trading completed. Total executed: {self.trade_amount - remaining_amount:.2f}, Remaining: {remaining_amount:.2f}")
+        else:
+            log_print(f"MarketOnlyAgent {self.id}: No trades executed")
+        
+        self.state = 'AWAITING_WAKEUP'
+        self.setWakeup(currentTime + self.getWakeFrequency())
+
+    def getCurrentBestPrices(self, is_buy_order):
+        """Get current best prices from both venues"""
+        clob_price = None
+        cfmm_price = None
+        
+        # Get CLOB price
         if self.clob_data:
             if is_buy_order and self.clob_data['asks']:
-                analysis['clob_best_price'] = self.clob_data['asks'][0][0]
+                clob_price = self.clob_data['asks'][0][0]
             elif not is_buy_order and self.clob_data['bids']:
-                analysis['clob_best_price'] = self.clob_data['bids'][0][0]
+                clob_price = self.clob_data['bids'][0][0]
         
+        # Get CFMM price
         if self.cfmm_data:
             x_reserve, y_reserve = self.cfmm_data['pool_reserves']
             if x_reserve > 0 and y_reserve > 0:
                 pool_price = y_reserve / x_reserve
-                phi = 1 - self.cfmm_fee  # phi = 1 - fee_rate
+                phi = 1 - self.cfmm_fee
                 
                 if is_buy_order:
-                    # CFMM ask price = pool_price / phi
-                    analysis['cfmm_best_price'] = pool_price / phi
+                    cfmm_price = pool_price / phi  # Ask price
                 else:
-                    # CFMM bid price = pool_price * phi
-                    analysis['cfmm_best_price'] = pool_price * phi
+                    cfmm_price = pool_price * phi  # Bid price
         
-        # Calculate slippage price as per Document 3
-        if is_buy_order:
-            best_ask = float('inf')
-            if analysis['clob_best_price'] is not None:
-                best_ask = min(best_ask, analysis['clob_best_price'])
-            if analysis['cfmm_best_price'] is not None:
-                best_ask = min(best_ask, analysis['cfmm_best_price'])
-            
-            if best_ask != float('inf'):
-                analysis['slippage_price'] = best_ask * (1 + self.max_slippage)
-                analysis['best_venue'] = 'CLOB' if analysis['clob_best_price'] == best_ask else 'CFMM'
-        else:
-            best_bid = 0
-            if analysis['clob_best_price'] is not None:
-                best_bid = max(best_bid, analysis['clob_best_price'])
-            if analysis['cfmm_best_price'] is not None:
-                best_bid = max(best_bid, analysis['cfmm_best_price'])
-            
-            if best_bid > 0:
-                analysis['slippage_price'] = best_bid * (1 - self.max_slippage)
-                analysis['best_venue'] = 'CLOB' if analysis['clob_best_price'] == best_bid else 'CFMM'
-        
-        # Check if split trading is beneficial (both venues within slippage limits)
-        if (analysis['clob_best_price'] is not None and 
-            analysis['cfmm_best_price'] is not None):
-            
-            if is_buy_order:
-                clob_acceptable = analysis['clob_best_price'] <= analysis['slippage_price']
-                cfmm_acceptable = analysis['cfmm_best_price'] <= analysis['slippage_price']
-            else:
-                clob_acceptable = analysis['clob_best_price'] >= analysis['slippage_price']
-                cfmm_acceptable = analysis['cfmm_best_price'] >= analysis['slippage_price']
-            
-            if clob_acceptable and cfmm_acceptable:
-                analysis['split_trade'] = True
-                # Simple 50-50 split, can be optimized based on depth
-                analysis['split_ratios'] = {'CLOB': 0.5, 'CFMM': 0.5}
-        
-        return analysis
+        return clob_price, cfmm_price
 
-    def executeTradeDocument3(self, currentTime, is_buy_order, venue_analysis):
-        """Execute trade following Document 3 specifications"""
-        self.state = 'EXECUTING_TRADE'
-        self.current_strategy = venue_analysis
-        
-        if venue_analysis['split_trade']:
-            self.executeSplitTradeDocument3(currentTime, is_buy_order, venue_analysis)
-        else:
-            self.executeSingleVenueTradeDocument3(currentTime, is_buy_order, venue_analysis)
-
-    def executeSingleVenueTradeDocument3(self, currentTime, is_buy_order, venue_analysis):
-        """Execute trade on a single venue following Document 3"""
-        venue = venue_analysis['best_venue']
-        
+    def calculateTradeAmount(self, venue, is_buy_order, price, remaining_amount):
+        """Calculate how much to trade on a given venue"""
         if venue == 'CLOB':
-            self.executeCLOBTradeDocument3(currentTime, is_buy_order, self.trade_amount)
-        elif venue == 'CFMM':
-            self.executeCFMMTradeDocument3(currentTime, is_buy_order, self.trade_amount)
-
-    def executeSplitTradeDocument3(self, currentTime, is_buy_order, venue_analysis):
-        """Execute split trade across both venues following Document 3"""
-        ratios = venue_analysis['split_ratios']
-        clob_amount = self.trade_amount * ratios['CLOB']
-        cfmm_amount = self.trade_amount * ratios['CFMM']
-        
-        log_print(f"MarketOnlyAgent {self.id}: Splitting trade - CLOB: {clob_amount:.0f}, CFMM: {cfmm_amount:.0f}")
-        
-        # Execute both trades
-        if clob_amount >= self.min_trade_size:
-            self.executeCLOBTradeDocument3(currentTime, is_buy_order, clob_amount)
+            # For CLOB, we can trade the full remaining amount (subject to available liquidity)
+            # But we need to check available depth
+            if is_buy_order:
+                available_depth = sum(qty for _, qty in self.clob_data['asks'])
+            else:
+                available_depth = sum(qty for _, qty in self.clob_data['bids'])
             
-        if cfmm_amount >= self.min_trade_size:
-            self.executeCFMMTradeDocument3(currentTime, is_buy_order, cfmm_amount)
+            # Convert depth to currency amount
+            depth_amount = available_depth * price
+            return min(remaining_amount, depth_amount)
+        
+        else:  # CFMM
+            # For CFMM, we can trade the full remaining amount
+            # The CFMM will handle the actual execution based on pool reserves
+            return remaining_amount
 
-    def executeCLOBTradeDocument3(self, currentTime, is_buy_order, amount):
-        """Execute trade on CLOB following Document 3"""
+    def executeCLOBTradeFlowChart(self, currentTime, is_buy_order, amount, best_price):
+        """Execute CLOB trade following flow chart logic"""
         if is_buy_order:
             if self.clob_data and self.clob_data['asks']:
-                best_ask = self.clob_data['asks'][0][0]
-                if best_ask > 0:
-                    quantity = int(amount / best_ask)
-                    if quantity > 0:
-                        # Use limit order at best ask to ensure execution
-                        self.placeLimitOrder(self.symbol, quantity, True, best_ask)
-                        log_print(f"MarketOnlyAgent {self.id}: CLOB BUY order placed - {quantity} @ {best_ask:.4f}")
+                quantity = int(amount / best_price)
+                if quantity > 0:
+                    # Use limit order at best price to ensure execution
+                    self.placeLimitOrder(self.symbol, quantity, True, best_price)
+                    log_print(f"MarketOnlyAgent {self.id}: CLOB BUY order placed - {quantity} @ {best_price:.4f}")
+                    return True
         else:
             if self.clob_data and self.clob_data['bids']:
-                best_bid = self.clob_data['bids'][0][0]
-                if best_bid > 0:
-                    quantity = int(amount / best_bid)
-                    if quantity > 0:
-                        # Use limit order at best bid to ensure execution
-                        self.placeLimitOrder(self.symbol, quantity, False, best_bid)
-                        log_print(f"MarketOnlyAgent {self.id}: CLOB SELL order placed - {quantity} @ {best_bid:.4f}")
+                quantity = int(amount / best_price)
+                if quantity > 0:
+                    # Use limit order at best price to ensure execution
+                    self.placeLimitOrder(self.symbol, quantity, False, best_price)
+                    log_print(f"MarketOnlyAgent {self.id}: CLOB SELL order placed - {quantity} @ {best_price:.4f}")
+                    return True
+        return False
 
-    def executeCFMMTradeDocument3(self, currentTime, is_buy_order, amount):
-        """Execute trade on CFMM following Document 3"""
+    def executeCFMMTradeFlowChart(self, currentTime, is_buy_order, amount):
+        """Execute CFMM trade following flow chart logic"""
         if self.cfmm_exchange_id:
             self.sendMessage(self.cfmm_exchange_id, Message({
                 "msg": "CFMM_TRADE_REQUEST",
@@ -321,7 +367,10 @@ class MarketOnlyAgent(TradingAgent):
                 "max_slippage": self.max_slippage
             }))
             log_print(f"MarketOnlyAgent {self.id}: CFMM trade request sent - {amount} for {'BUY' if is_buy_order else 'SELL'}")
+            return True
+        return False
 
+    
     def handleTradeExecution(self, currentTime, msg):
         """Handle successful trade execution"""
         if msg.body['msg'] == 'ORDER_EXECUTED':

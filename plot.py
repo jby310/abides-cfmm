@@ -78,9 +78,9 @@ def process_volume_events(df):
 def plot_mid_price_comparison(merged, ax, styles):
     """绘制中间价预测与原始值对比图"""
     # 预测值曲线
-    ax.plot(merged.index, merged['mid_price_1_pred'], label='Hybrid', color='blue', linewidth=1.5)
+    ax.plot(merged.index, merged['mid_price_1_pred'], label='Hybrid', color=styles[name]['color'], linewidth=1.5)
     # 原始值曲线
-    ax.plot(merged.index, merged['mid_price_1_origin'], label='Original', color=styles[name]['color'], linewidth=1.5, alpha=styles[name]['alpha'])
+    ax.plot(merged.index, merged['mid_price_1_origin'], label='Original', color='blue', linewidth=1.5, alpha=styles[name]['alpha'])
 
     # 图表美化
     ax.set_xlabel('Timestamp', fontsize=10)
