@@ -326,7 +326,7 @@ agent_count += 1
 # 7) MarketOnlyAgents 5229-5428W
 from agent.MarketOnlyAgent import MarketOnlyAgent
 
-num_market_only_agents = 200
+num_market_only_agents = 100
 agents.extend([MarketOnlyAgent(id=j,
                              name="MARKET_ONLY_AGENT_{}".format(j),
                              type="MarketOnlyAgent",

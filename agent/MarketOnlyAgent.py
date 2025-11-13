@@ -46,7 +46,7 @@ class MarketOnlyAgent(TradingAgent):
         self.venue_preference = {'CLOB': 0, 'CFMM': 0}
         
         # Trade amount as per Document 3 - fixed amount M
-        self.trade_amount = starting_cash  # Fixed amount M as per Document 3
+        self.trade_amount = 10000  # Fixed amount M as per Document 3
         
     def kernelStarting(self, startTime):
         super().kernelStarting(startTime)
@@ -449,45 +449,89 @@ class MarketOnlyAgent(TradingAgent):
         return False
 
     def calculateCFMMAmount(self, is_buy_order, remaining_amount):
-        """Calculate CFMM tradable amount using Document 3 formulas"""
-        if not self.cfmm_data:
+        """Calculate CFMM tradable amount using Document 3 formulas with CLOB price boundary"""
+        if not self.cfmm_data or not self.clob_data:
             return 0
             
         x_reserve, y_reserve = self.cfmm_data['pool_reserves']
         k = x_reserve * y_reserve
         phi = 1 - self.cfmm_fee
         
+        # 获取CLOB的最佳价格
         if is_buy_order:
-            # Buying X with Y
+            # P_aL[n] 是CLOB上的最佳卖价
+            if self.clob_data['asks']:
+                P_aL = self.clob_data['asks'][0][0]  # CLOB最佳卖价
+            else:
+                P_aL = float('inf')
+        else:
+            # P_bL[n] 是CLOB上的最佳买价
+            if self.clob_data['bids']:
+                P_bL = self.clob_data['bids'][0][0]  # CLOB最佳买价
+            else:
+                P_bL = 0
+        
+        if is_buy_order:
+            # 买入情况：购买X（支付Y）
+            # 边界条件：min(P_aL[n], slippage_price) = (1/φ) * (y / (x - Δx))
+            
+            # 计算滑点价格限制
             current_price = y_reserve / x_reserve if x_reserve > 0 else 0
             slippage_price = current_price * (1 + self.max_slippage)
-            effective_price = min(current_price / phi, slippage_price)
             
-            if effective_price <= 0:
+            # 使用CLOB价格和滑点价格中的较小值作为边界
+            boundary_price = min(P_aL, slippage_price) if P_aL != float('inf') else slippage_price
+            
+            if boundary_price <= 0:
                 return 0
                 
-            # Solve for Δx: min(P_aL[n], slippage_price) = (1/φ) * (y / (x - Δx))
-            # Δx = x - (1/φ) * (y / min(P_aL[n], slippage_price))
-            delta_x = x_reserve - (1/phi) * (y_reserve / effective_price)
-            delta_x = max(0, min(delta_x, x_reserve * 0.1))  # Limit to 10% of pool
+            # 解方程：boundary_price = (1/φ) * (y / (x - Δx))
+            # 重排得到：x - Δx = (1/φ) * (y / boundary_price)
+            # 所以：Δx = x - (1/φ) * (y / boundary_price)
+            delta_x = x_reserve - (1/phi) * (y_reserve / boundary_price)
             
-            max_tradable_amount = delta_x * effective_price
+            # 确保Δx在合理范围内
+            delta_x = max(0, min(delta_x, x_reserve * 0.1))  # 限制为池子的10%
             
+            # 计算对应的Δy（实际支付金额）
+            # 根据CFMM公式：(y + φ*Δy) * (x - Δx) = k
+            # 所以：Δy = (1/φ) * (k/(x - Δx) - y)
+            if delta_x > 0 and (x_reserve - delta_x) > 0:
+                delta_y = (1/phi) * (k / (x_reserve - delta_x) - y_reserve)
+                max_tradable_amount = delta_y  # 这是需要支付的Y金额
+            else:
+                max_tradable_amount = 0
+                
         else:
-            # Selling X for Y
+            # 卖出情况：卖出X（获得Y）
+            # 边界条件：max(P_bL[n], slippage_price) = φ * (y / (x + φ * Δx))
+            
+            # 计算滑点价格限制
             current_price = y_reserve / x_reserve if x_reserve > 0 else 0
             slippage_price = current_price * (1 - self.max_slippage)
-            effective_price = max(current_price * phi, slippage_price)
             
-            if effective_price <= 0:
+            # 使用CLOB价格和滑点价格中的较大值作为边界
+            boundary_price = max(P_bL, slippage_price)
+            
+            if boundary_price <= 0:
                 return 0
                 
-            # Solve for Δx: max(P_bL[n], slippage_price) = φ * (y / (x + φ * Δx))
-            # Δx = (1/φ) * (φ * (y / max(P_bL[n], slippage_price)) - x)
-            delta_x = (1/phi) * (phi * (y_reserve / effective_price) - x_reserve)
-            delta_x = max(0, min(delta_x, x_reserve * 0.1))  # Limit to 10% of pool
+            # 解方程：boundary_price = φ * (y / (x + φ * Δx))
+            # 重排得到：x + φ * Δx = φ * (y / boundary_price)
+            # 所以：Δx = (1/φ) * (φ * (y / boundary_price) - x)
+            delta_x = (1/phi) * (phi * (y_reserve / boundary_price) - x_reserve)
             
-            max_tradable_amount = delta_x * effective_price
+            # 确保Δx在合理范围内
+            delta_x = max(0, min(delta_x, x_reserve * 0.1))  # 限制为池子的10%
+            
+            # 计算对应的Δy（实际获得金额）
+            # 根据CFMM公式：(x + φ*Δx) * (y - Δy) = k
+            # 所以：Δy = y - k/(x + φ*Δx)
+            if delta_x > 0:
+                delta_y = y_reserve - k / (x_reserve + phi * delta_x)
+                max_tradable_amount = delta_y  # 这是可以获得的Y金额
+            else:
+                max_tradable_amount = 0
         
         return min(remaining_amount, max_tradable_amount)
 

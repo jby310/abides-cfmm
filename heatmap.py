@@ -9,7 +9,7 @@ import json
 plt.rcParams['font.sans-serif'] = ['SimHei']  # 或 ['Microsoft YaHei'] 微软雅黑 等
 plt.rcParams['axes.unicode_minus'] = False   # 解决负号 '-' 显示为方块的问题
 
-IS_CONTROL_GROUP_RUN = True
+IS_CONTROL_GROUP_RUN = False
 
 class ExperimentRunner:
     def __init__(self, base_cmd):
