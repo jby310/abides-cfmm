@@ -194,6 +194,7 @@ class AdaptiveMarketMakerAgent(TradingAgent):
         :param spread:
         :return:
         """
+        # 指数加权移动平均（Exponentially Weighted Moving Average, EWMA）算法
         spread_ewma = self.spread_alpha * spread + (1 - self.spread_alpha) * self.last_spread
         self.window_size = spread_ewma
         self.last_spread = spread_ewma

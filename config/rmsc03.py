@@ -323,6 +323,23 @@ agents.extend(execution_agents)
 agent_types.extend("ExecutionAgent")
 agent_count += 1
 
+# 7) MarketOnlyAgents 5229-5428W
+from agent.MarketOnlyAgent import MarketOnlyAgent
+
+num_market_only_agents = 200
+agents.extend([MarketOnlyAgent(id=j,
+                             name="MARKET_ONLY_AGENT_{}".format(j),
+                             type="MarketOnlyAgent",
+                             symbol=symbol,
+                             wake_up_freq='60s',
+                             log_orders=log_orders,
+                             starting_cash=starting_cash,
+                             trade_direction=(j < agent_count + num_market_only_agents//2),
+                             random_state=np.random.RandomState(seed=np.random.randint(low=0, high=2 ** 32,
+                                                                                       dtype='uint64')))
+               for j in range(agent_count, agent_count + num_market_only_agents)])
+agent_count += num_market_only_agents
+agent_types.extend("MarketOnlyAgent")
 
 # 导入SnapshotAgent
 from agent.SnapshotAgent import SnapshotAgent

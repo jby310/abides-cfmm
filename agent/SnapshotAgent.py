@@ -44,6 +44,7 @@ class SnapshotAgent(TradingAgent):
             self.state = 'INACTIVE'
 
     def take_snapshot(self, currentTime):
+        # CLOB快照
         # 查询当前价差
         self.getCurrentSpread(self.symbol, depth=10)
         # 查询交易量

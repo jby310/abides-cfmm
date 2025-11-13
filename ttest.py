@@ -1,26 +1,16 @@
-from scipy.stats import ttest_rel
-import numpy as np
+import argparse
+import json
+import os
 import pandas as pd
+import numpy as np
+from scipy.stats import ttest_rel
 
 def second_level_did(hybrid_path, original_path,
                      metrics=('spread', 'depth', 'volume'),
                      tol='500ms'):
     """
     逐秒差分 + 配对 t 检验（同一秒配对）
-    参数
-    ----
-    hybrid_path   : str  -- Hybrid 日志 pickle 路径
-    original_path : str  -- Original 日志 pickle 路径
-    metrics       : tuple-- 需要检验的指标名（与 Event 字典 key 对应）
-    tol           : str  -- merge_asof 容差，默认 ±500 ms
-    返回
-    ----
-    delta_df    : DataFrame-- 逐秒差值（列=Δmetric）
-    mean_deltas : Series   -- 三指标差值的均值
-    t_stats     : Series   -- 三指标配对 t 值
-    p_vals      : Series   -- 三指标配对 p 值
     """
-
     # 1. 读数据 → 统一秒级索引
     def _load_second_df(path):
         df = pd.read_pickle(path).reset_index()
@@ -86,21 +76,75 @@ def second_level_did(hybrid_path, original_path,
 
     return delta_df, mean_deltas, pd.Series(t_stats), pd.Series(p_vals)
 
-if __name__ == "__main__":
-    # 调用函数并获取均值信息
-    delta_df, mean_deltas, t_stats, p_vals = second_level_did(
-        hybrid_path=r'log\rmsc04_two_hour\SNAPSHOT_AGENT.bz2',
-        original_path=r'log\rmsc03_two_hour\SNAPSHOT_AGENT.bz2'
-    )
+def main():
+    # 解析命令行参数
+    parser = argparse.ArgumentParser(description='运行t检验分析')
+    parser.add_argument('--output_dir', type=str, help='输出目录', default='ttest_results')
+    args = parser.parse_args()
     
-    # 打印结果（包含均值）
-    print('=== 逐秒配对 t 检验 ===')
-    for m in ['spread', 'depth', 'volume']:
-        print(
-            f'Δ{m.capitalize():<7}: '
-            f'均值={mean_deltas[f"Δ{m}"]:.4f}, '
-            f't={t_stats[m]:6.2f}, '
-            f'p={p_vals[m]:.3g}'
+    # 创建输出目录
+    os.makedirs(args.output_dir, exist_ok=True)
+    
+    # 构建文件路径
+    hybrid_path = f'log/rmsc04_two_hour/SNAPSHOT_AGENT.bz2'
+    original_path = 'log/rmsc03_two_hour/SNAPSHOT_AGENT.bz2'
+    
+    try:
+        # 调用函数并获取结果
+        delta_df, mean_deltas, t_stats, p_vals = second_level_did(
+            hybrid_path=hybrid_path,
+            original_path=original_path
         )
-    
-    delta_df.to_csv('second_did_delta.csv')
+        
+        # 准备结果数据
+        result = {
+            'spread_mean': mean_deltas['Δspread'],
+            'spread_t': t_stats['spread'],
+            'spread_p': p_vals['spread'],
+            'depth_mean': mean_deltas['Δdepth'],
+            'depth_t': t_stats['depth'],
+            'depth_p': p_vals['depth'],
+            'volume_mean': mean_deltas['Δvolume'],
+            'volume_t': t_stats['volume'],
+            'volume_p': p_vals['volume']
+        }
+        
+        # 保存结果到JSON文件
+        with open(os.path.join(args.output_dir, 'ttest_results.json'), 'w') as f:
+            json.dump(result, f, indent=2)
+        
+        # 保存详细的差值数据
+        delta_df.to_csv(os.path.join(args.output_dir, 'second_did_delta.csv'))
+        
+        # 打印结果（可选）
+        print('=== 逐秒配对 t 检验 ===')
+        for m in ['spread', 'depth', 'volume']:
+            print(
+                f'Δ{m.capitalize():<7}: '
+                f'均值={result[f"{m}_mean"]:.4f}, '
+                f't={result[f"{m}_t"]:6.2f}, '
+                f'p={result[f"{m}_p"]:.3g}'
+            )
+        
+        print(f"结果已保存到 {args.output_dir}")
+        
+    except Exception as e:
+        print(f"t检验分析失败: {e}")
+        # 保存错误信息
+        error_result = {
+            'error': str(e),
+            'spread_mean': 0,
+            'spread_t': 0,
+            'spread_p': 1,
+            'depth_mean': 0,
+            'depth_t': 0,
+            'depth_p': 1,
+            'volume_mean': 0,
+            'volume_t': 0,
+            'volume_p': 1
+        }
+        with open(os.path.join(args.output_dir, 'ttest_results.json'), 'w') as f:
+            json.dump(error_result, f, indent=2)
+
+if __name__ == "__main__":
+    main()

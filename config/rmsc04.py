@@ -185,7 +185,7 @@ symbols = {symbol: {'r_bar': r_bar,
 
 oracle = SparseMeanRevertingOracle(mkt_open, mkt_close, symbols)
 
-# 1) Exchange Agent
+# 1) Exchange Agent 1
 
 #  How many orders in the past to store for transacted volume computation
 # stream_history_length = int(pd.to_timedelta(args.mm_wake_up_freq).total_seconds() * 100)
@@ -207,7 +207,7 @@ agents.extend([ExchangeAgent(id=0,
 agent_types.extend("ExchangeAgent")
 agent_count += 1
 
-# 2) Noise Agents
+# 2) Noise Agents 2-5001
 num_noise = 5000
 noise_mkt_open = historical_date + pd.to_timedelta("09:00:00")  # These times needed for distribution of arrival times
                                                                 # of Noise Agents
@@ -224,7 +224,7 @@ agents.extend([NoiseAgent(id=j,
 agent_count += num_noise
 agent_types.extend(['NoiseAgent'])
 
-# 3) Value Agents
+# 3) Value Agents 5002-5201
 num_value = 200
 agents.extend([ValueAgent(id=j,
                           name="Value Agent {}".format(j),
@@ -241,7 +241,7 @@ agents.extend([ValueAgent(id=j,
 agent_count += num_value
 agent_types.extend(['ValueAgent'])
 
-# 4) Market Maker Agents
+# 4) Market Maker Agents 5202
 
 """
 window_size ==  Spread of market maker (in ticks) around the mid price
@@ -253,9 +253,10 @@ wake_up_freq == How often the market maker wakes up
 """
 
 # each elem of mm_params is tuple (window_size, pov, num_ticks, wake_up_freq, min_order_size)
-mm_params = [(args.mm_window_size, args.mm_pov, args.mm_num_ticks, args.mm_wake_up_freq, args.mm_min_order_size),
-             (args.mm_window_size, args.mm_pov, args.mm_num_ticks, args.mm_wake_up_freq, args.mm_min_order_size)
-             ]
+# mm_params = [(args.mm_window_size, args.mm_pov, args.mm_num_ticks, args.mm_wake_up_freq, args.mm_min_order_size),
+#              (args.mm_window_size, args.mm_pov, args.mm_num_ticks, args.mm_wake_up_freq, args.mm_min_order_size)
+#              ]
+mm_params = [(args.mm_window_size, args.mm_pov, args.mm_num_ticks, args.mm_wake_up_freq, args.mm_min_order_size)]
 
 num_mm_agents = len(mm_params)
 mm_cancel_limit_delay = 50  # 50 nanoseconds
@@ -276,13 +277,14 @@ agents.extend([AdaptiveMarketMakerAgent(id=j,
                                 spread_alpha=args.mm_spread_alpha,
                                 backstop_quantity=args.mm_backstop_quantity,
                                 log_orders=log_orders,
+                                subscribe_num_levels=10,
                                 random_state=np.random.RandomState(seed=np.random.randint(low=0, high=2 ** 32,
                                                                                           dtype='uint64')))
                for idx, j in enumerate(range(agent_count, agent_count + num_mm_agents))])
 agent_count += num_mm_agents
 agent_types.extend('POVMarketMakerAgent')
 
-# 5) Momentum Agents
+# 5) Momentum Agents # 5203-5227
 num_momentum_agents = 25
 
 agents.extend([MomentumAgent(id=j,
@@ -300,7 +302,7 @@ agents.extend([MomentumAgent(id=j,
 agent_count += num_momentum_agents
 agent_types.extend("MomentumAgent")
 
-# 6) Execution Agent
+# 6) Execution Agent 5228
 
 trade = True if args.execution_agents else False
 
@@ -335,7 +337,7 @@ agents.extend(execution_agents)
 agent_types.extend("ExecutionAgent")
 agent_count += 1
 
-# 7) MarketOnlyAgents
+# 7) MarketOnlyAgents 5229-5428
 from agent.MarketOnlyAgent import MarketOnlyAgent
 
 num_market_only_agents = 200
@@ -343,9 +345,10 @@ agents.extend([MarketOnlyAgent(id=j,
                              name="MARKET_ONLY_AGENT_{}".format(j),
                              type="MarketOnlyAgent",
                              symbol=symbol,
-                             starting_cash=starting_cash,
                              wake_up_freq='60s',
                              log_orders=log_orders,
+                             starting_cash=starting_cash,
+                             trade_direction=(j < agent_count + num_market_only_agents//2),
                              random_state=np.random.RandomState(seed=np.random.randint(low=0, high=2 ** 32,
                                                                                        dtype='uint64')))
                for j in range(agent_count, agent_count + num_market_only_agents)])

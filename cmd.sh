@@ -1,8 +1,8 @@
 # run abides
 # python -u abides.py -c rmsc03 -t ABM -d 20200603 -s 1234 -l rmsc03_two_hour
-python -u abides.py -c rmsc03 -t ETH -d 20251028 -s 1235 -l rmsc03_two_hour --end-time 10:00:00
+python -u abides.py -c rmsc03 -t ETH -d 20251028 -s 1235 -l rmsc03_two_hour --start-time 09:30:00 --end-time 09:45:00
 
-python -u abides.py -c rmsc04 -t ETH -d 20251028 -s 1235 -l rmsc04_two_hour --end-time 10:00:00 -k 10000000000 --fee 0.008
+python -u abides.py -c rmsc04 -t ETH -d 20251028 -s 1235 -l rmsc04_two_hour --start-time 09:30:00 --end-time 09:45:00 -k 10000000 --fee 0.008
 
 python ttest.py
 
