@@ -65,31 +65,30 @@ class CFMMAgent(ExchangeAgent):
     
     def calculate_trade_output(self, input_amount, is_buy_order):
         """
-        Calculate output amount for a given input amount following Document 3 formulas
-        is_buy_order: True if buying X (paying Y), False if selling X (receiving Y)
+        严格按照实验设计思路计算交易输出
         """
         if is_buy_order:
-            # Buying X with Y: input is Δy, output is Δx
-            # Formula: (x - Δx) * (y + φ*Δy) = k
+            # 买入X用Y：输入Δy，输出Δx
+            # 公式: (x - Δx) * (y + φ*Δy) = k
             if self.x == 0 or input_amount <= 0:
                 return 0
             
             phi = 1 - self.fee
             fee_adjusted_input = input_amount * phi
             
-            # Solve for Δx: Δx = x - k/(y + φ*Δy)
+            # 解方程: Δx = x - k/(y + φ*Δy)
             delta_x = self.x - (self.k / (self.y + fee_adjusted_input))
             return max(0, delta_x)
         else:
-            # Selling X for Y: input is Δx, output is Δy
-            # Formula: (x + φ*Δx) * (y - Δy) = k
+            # 卖出X得Y：输入Δx，输出Δy  
+            # 公式: (x + φ*Δx) * (y - Δy) = k
             if self.y == 0 or input_amount <= 0:
                 return 0
             
             phi = 1 - self.fee
             fee_adjusted_input = input_amount * phi
             
-            # Solve for Δy: Δy = y - k/(x + φ*Δx)
+            # 解方程: Δy = y - k/(x + φ*Δx)
             delta_y = self.y - (self.k / (self.x + fee_adjusted_input))
             return max(0, delta_y)
     
@@ -207,31 +206,20 @@ class CFMMAgent(ExchangeAgent):
             return quantity, execution_price, fee_amount
     
     def depth_at_1pct(self):
-        """
-        Calculate depth at 1% price movement as per Document 3
-        Depth: the trade volume required to move price by 1%
-        """
+        """严格按照实验设计思路计算深度"""
         if self.x == 0 or self.y == 0:
             return 0.0
         
-        # For buying X (price increases by 1%)
-        # To increase price by 1%, we need to calculate Δx needed
         current_price = self.get_pool_price()
-        target_price = current_price * 1.01
         
-        # Using the formula: new_y / new_x = target_price
-        # And new_x * new_y = k (approximately, ignoring fees for depth calculation)
-        # We can solve for the required trade
-        new_x = np.sqrt(self.k / target_price)
-        delta_x_buy = self.x - new_x
+        # 压价 1% 需要买入的 Δx
+        delta_x_buy = self.x * (1/0.99 - 1)
         
-        # For selling X (price decreases by 1%)
-        target_price = current_price * 0.99
-        new_x = np.sqrt(self.k / target_price)
-        delta_x_sell = new_x - self.x
+        # 抬价 1% 需要卖出的 Δy  
+        delta_y_sell = self.y * (1.01 - 1)
         
-        # Take the minimum of both directions as depth
-        depth = min(abs(delta_x_buy), abs(delta_x_sell))
+        # 取双向最小作为深度
+        depth = min(delta_x_buy, delta_y_sell)
         
         return max(0, depth)
     

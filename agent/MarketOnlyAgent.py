@@ -165,8 +165,7 @@ class MarketOnlyAgent(TradingAgent):
             self.setWakeup(currentTime + self.getWakeFrequency())
             return
             
-        # Use fixed trade direction as per Document 3 (not random)
-        is_buy_order = self.trade_direction
+        is_buy_order = self.random_state.choice([True, False])
         action = "BUY" if is_buy_order else "SELL"
         
         log_print(f"MarketOnlyAgent {self.id}: Planning to {action} {self.trade_amount} worth of {self.symbol}")
@@ -294,43 +293,203 @@ class MarketOnlyAgent(TradingAgent):
         return clob_price, cfmm_price
 
     def calculateTradeAmount(self, venue, is_buy_order, price, remaining_amount):
-        """Calculate how much to trade on a given venue"""
+        """Calculate how much to trade on a given venue following proper market structure"""
         if venue == 'CLOB':
-            # For CLOB, we can trade the full remaining amount (subject to available liquidity)
-            # But we need to check available depth
+            # For CLOB, trade through order book levels until price exceeds slippage limit
             if is_buy_order:
-                available_depth = sum(qty for _, qty in self.clob_data['asks'])
+                return self.calculateCLOBBuyAmount(remaining_amount)
             else:
-                available_depth = sum(qty for _, qty in self.clob_data['bids'])
-            
-            # Convert depth to currency amount
-            depth_amount = available_depth * price
-            return min(remaining_amount, depth_amount)
+                return self.calculateCLOBSellAmount(remaining_amount)
         
         else:  # CFMM
-            # For CFMM, we can trade the full remaining amount
-            # The CFMM will handle the actual execution based on pool reserves
-            return remaining_amount
+            # For CFMM, calculate maximum tradable amount based on pool reserves and slippage
+            return self.calculateCFMMAmount(is_buy_order, remaining_amount)
+
+    def calculateCLOBBuyAmount(self, remaining_amount):
+        """Calculate how much to buy from CLOB order book within slippage limits"""
+        if not self.clob_data or not self.clob_data['asks']:
+            return 0
+        
+        total_tradable = 0
+        current_remaining = remaining_amount
+        slippage_limit = self.clob_data['asks'][0][0] * (1 + self.max_slippage)
+        
+        for price, quantity in self.clob_data['asks']:
+            # Stop if price exceeds slippage limit
+            if price > slippage_limit:
+                break
+                
+            # Calculate how much we can buy at this price level
+            level_value = price * quantity
+            if level_value <= current_remaining:
+                # Can buy entire level
+                total_tradable += level_value
+                current_remaining -= level_value
+            else:
+                # Can only buy part of this level
+                tradable_at_level = current_remaining
+                total_tradable += tradable_at_level
+                current_remaining = 0
+                break
+                
+            if current_remaining <= 0:
+                break
+        
+        return total_tradable
+
+    def calculateCLOBSellAmount(self, remaining_amount):
+        """Calculate how much to sell to CLOB order book within slippage limits"""
+        if not self.clob_data or not self.clob_data['bids']:
+            return 0
+        
+        total_tradable = 0
+        current_remaining = remaining_amount
+        slippage_limit = self.clob_data['bids'][0][0] * (1 - self.max_slippage)
+        
+        for price, quantity in self.clob_data['bids']:
+            # Stop if price falls below slippage limit
+            if price < slippage_limit:
+                break
+                
+            # Calculate how much we can sell at this price level
+            level_value = price * quantity
+            if level_value <= current_remaining:
+                # Can sell entire level
+                total_tradable += level_value
+                current_remaining -= level_value
+            else:
+                # Can only sell part of this level
+                tradable_at_level = current_remaining
+                total_tradable += tradable_at_level
+                current_remaining = 0
+                break
+                
+            if current_remaining <= 0:
+                break
+        
+        return total_tradable
 
     def executeCLOBTradeFlowChart(self, currentTime, is_buy_order, amount, best_price):
-        """Execute CLOB trade following flow chart logic"""
+        """Execute CLOB trade by walking through the order book"""
         if is_buy_order:
-            if self.clob_data and self.clob_data['asks']:
-                quantity = int(amount / best_price)
-                if quantity > 0:
-                    # Use limit order at best price to ensure execution
-                    self.placeLimitOrder(self.symbol, quantity, True, best_price)
-                    log_print(f"MarketOnlyAgent {self.id}: CLOB BUY order placed - {quantity} @ {best_price:.4f}")
-                    return True
+            return self.executeCLOBBuyOrder(currentTime, amount)
         else:
-            if self.clob_data and self.clob_data['bids']:
-                quantity = int(amount / best_price)
-                if quantity > 0:
-                    # Use limit order at best price to ensure execution
-                    self.placeLimitOrder(self.symbol, quantity, False, best_price)
-                    log_print(f"MarketOnlyAgent {self.id}: CLOB SELL order placed - {quantity} @ {best_price:.4f}")
-                    return True
+            return self.executeCLOBSellOrder(currentTime, amount)
+
+    def executeCLOBBuyOrder(self, currentTime, amount):
+        """Execute CLOB buy order by walking through ask levels"""
+        if not self.clob_data or not self.clob_data['asks']:
+            return False
+        
+        remaining_amount = amount
+        slippage_limit = self.clob_data['asks'][0][0] * (1 + self.max_slippage)
+        total_quantity = 0
+        
+        for price, quantity in self.clob_data['asks']:
+            if price > slippage_limit:
+                break
+                
+            level_value = price * quantity
+            if level_value <= remaining_amount:
+                # Buy entire level
+                self.placeLimitOrder(self.symbol, quantity, True, price)
+                total_quantity += quantity
+                remaining_amount -= level_value
+            else:
+                # Buy part of this level
+                partial_quantity = int(remaining_amount / price)
+                if partial_quantity > 0:
+                    self.placeLimitOrder(self.symbol, partial_quantity, True, price)
+                    total_quantity += partial_quantity
+                    remaining_amount = 0
+                break
+                
+            if remaining_amount <= 0:
+                break
+        
+        if total_quantity > 0:
+            log_print(f"MarketOnlyAgent {self.id}: CLOB BUY executed - {total_quantity} shares, {amount - remaining_amount:.2f} value")
+            return True
         return False
+
+    def executeCLOBSellOrder(self, currentTime, amount):
+        """Execute CLOB sell order by walking through bid levels"""
+        if not self.clob_data or not self.clob_data['bids']:
+            return False
+        
+        remaining_amount = amount
+        slippage_limit = self.clob_data['bids'][0][0] * (1 - self.max_slippage)
+        total_quantity = 0
+        
+        for price, quantity in self.clob_data['bids']:
+            if price < slippage_limit:
+                break
+                
+            level_value = price * quantity
+            if level_value <= remaining_amount:
+                # Sell entire level
+                self.placeLimitOrder(self.symbol, quantity, False, price)
+                total_quantity += quantity
+                remaining_amount -= level_value
+            else:
+                # Sell part of this level
+                partial_quantity = int(remaining_amount / price)
+                if partial_quantity > 0:
+                    self.placeLimitOrder(self.symbol, partial_quantity, False, price)
+                    total_quantity += partial_quantity
+                    remaining_amount = 0
+                break
+                
+            if remaining_amount <= 0:
+                break
+        
+        if total_quantity > 0:
+            log_print(f"MarketOnlyAgent {self.id}: CLOB SELL executed - {total_quantity} shares, {amount - remaining_amount:.2f} value")
+            return True
+        return False
+
+    def calculateCFMMAmount(self, is_buy_order, remaining_amount):
+        """Calculate CFMM tradable amount using Document 3 formulas"""
+        if not self.cfmm_data:
+            return 0
+            
+        x_reserve, y_reserve = self.cfmm_data['pool_reserves']
+        k = x_reserve * y_reserve
+        phi = 1 - self.cfmm_fee
+        
+        if is_buy_order:
+            # Buying X with Y
+            current_price = y_reserve / x_reserve if x_reserve > 0 else 0
+            slippage_price = current_price * (1 + self.max_slippage)
+            effective_price = min(current_price / phi, slippage_price)
+            
+            if effective_price <= 0:
+                return 0
+                
+            # Solve for Δx: min(P_aL[n], slippage_price) = (1/φ) * (y / (x - Δx))
+            # Δx = x - (1/φ) * (y / min(P_aL[n], slippage_price))
+            delta_x = x_reserve - (1/phi) * (y_reserve / effective_price)
+            delta_x = max(0, min(delta_x, x_reserve * 0.1))  # Limit to 10% of pool
+            
+            max_tradable_amount = delta_x * effective_price
+            
+        else:
+            # Selling X for Y
+            current_price = y_reserve / x_reserve if x_reserve > 0 else 0
+            slippage_price = current_price * (1 - self.max_slippage)
+            effective_price = max(current_price * phi, slippage_price)
+            
+            if effective_price <= 0:
+                return 0
+                
+            # Solve for Δx: max(P_bL[n], slippage_price) = φ * (y / (x + φ * Δx))
+            # Δx = (1/φ) * (φ * (y / max(P_bL[n], slippage_price)) - x)
+            delta_x = (1/phi) * (phi * (y_reserve / effective_price) - x_reserve)
+            delta_x = max(0, min(delta_x, x_reserve * 0.1))  # Limit to 10% of pool
+            
+            max_tradable_amount = delta_x * effective_price
+        
+        return min(remaining_amount, max_tradable_amount)
 
     def executeCFMMTradeFlowChart(self, currentTime, is_buy_order, amount):
         """Execute CFMM trade following flow chart logic"""
