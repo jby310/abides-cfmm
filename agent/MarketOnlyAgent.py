@@ -157,29 +157,6 @@ class MarketOnlyAgent(TradingAgent):
         # Both queries completed, analyze and trade
         self.analyzeMarketsAndTrade(currentTime)
 
-    # def analyzeMarketsAndTrade(self, currentTime):
-    #     """Analyze both markets and execute optimal trade as per Document 3"""
-    #     if not self.clob_data and not self.cfmm_data:
-    #         log_print(f"MarketOnlyAgent {self.id}: No market data available")
-    #         self.state = 'AWAITING_WAKEUP'
-    #         self.setWakeup(currentTime + self.getWakeFrequency())
-    #         return
-            
-    #     # Use fixed trade direction as per Document 3 (not random)
-    #     is_buy_order = self.trade_direction
-    #     action = "BUY" if is_buy_order else "SELL"
-        
-    #     log_print(f"MarketOnlyAgent {self.id}: Planning to {action} {self.trade_amount} worth of {self.symbol}")
-        
-    #     # Compare venues and execute trade following Document 3 logic
-    #     venue_analysis = self.compareVenuesDocument3(is_buy_order)
-        
-    #     if venue_analysis['best_venue'] or venue_analysis['split_trade']:
-    #         self.executeTradeDocument3(currentTime, is_buy_order, venue_analysis)
-    #     else:
-    #         log_print(f"MarketOnlyAgent {self.id}: No suitable venue found within slippage limits")
-    #         self.state = 'AWAITING_WAKEUP'
-    #         self.setWakeup(currentTime + self.getWakeFrequency())
     def analyzeMarketsAndTrade(self, currentTime):
         """Analyze both markets and execute optimal trade following Document 3 flow chart"""
         if not self.clob_data and not self.cfmm_data:
