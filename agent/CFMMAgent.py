@@ -9,8 +9,11 @@ from copy import deepcopy
 class CFMMAgent(ExchangeAgent):
     """
     Constant Function Market Maker Agent implementing AMM functionality
-    Strictly follows Document 3 specifications
+    Modified logic: is_buy_order=True uses Y to buy X, False sells X to get Y
     """
+    
+    # Class-level registry for static access
+    _cfmm_instances = {}
     
     def __init__(self, id, name, type, mkt_open, mkt_close, symbol, 
                  initial_k=10000000, fee=0.003, 
@@ -36,12 +39,102 @@ class CFMMAgent(ExchangeAgent):
         self.y = self.initial_y  # Reserve of asset Y (e.g., USDT)
         self.k = self.initial_k  # Constant product
 
-        # Transaction history for volume calculation
-        self.transaction_history = []
+        # Register instance for static access
+        CFMMAgent._cfmm_instances[symbol] = self
+    
+    @classmethod
+    def get_cfmm_instance(cls, symbol):
+        """Static method to get CFMM instance by symbol"""
+        return cls._cfmm_instances.get(symbol)
+    
+    @classmethod
+    def get_cfmm_market_data(cls, symbol, levels=1):
+        """
+        Static interface to get CFMM market data
+        Returns None if CFMM instance not found
+        """
+        cfmm_instance = cls.get_cfmm_instance(symbol)
+        if cfmm_instance is None:
+            return None
+        return cfmm_instance.get_market_data(levels)
+    
+    @classmethod
+    def get_cfmm_pool_price(cls, symbol):
+        """Static interface to get CFMM pool price"""
+        cfmm_instance = cls.get_cfmm_instance(symbol)
+        if cfmm_instance is None:
+            return None
+        return cfmm_instance.get_pool_price()
+    
+    @classmethod
+    def get_cfmm_reserves(cls, symbol):
+        """Static interface to get CFMM reserves"""
+        cfmm_instance = cls.get_cfmm_instance(symbol)
+        if cfmm_instance is None:
+            return None
+        return (cfmm_instance.x, cfmm_instance.y)
+    
+    @classmethod
+    def get_cfmm_fee_rate(cls, symbol):
+        """Static interface to get CFMM fee rate"""
+        cfmm_instance = cls.get_cfmm_instance(symbol)
+        if cfmm_instance is None:
+            return None
+        return cfmm_instance.fee
+    
+    @classmethod
+    def calculate_cfmm_trade_output(cls, symbol, input_amount, is_buy_order):
+        """Static interface to calculate trade output"""
+        cfmm_instance = cls.get_cfmm_instance(symbol)
+        if cfmm_instance is None:
+            return 0
+        return cfmm_instance.calculate_trade_output(input_amount, is_buy_order)
+    
+    @classmethod
+    def calculate_cfmm_effective_price(cls, symbol, trade_amount, is_buy_order):
+        """Static interface to calculate effective price"""
+        cfmm_instance = cls.get_cfmm_instance(symbol)
+        if cfmm_instance is None:
+            return None, 1.0
+        return cfmm_instance.calculate_effective_price(trade_amount, is_buy_order)
+    
+    @classmethod
+    def get_cfmm_bid_ask_prices(cls, symbol):
+        """Static interface to get CFMM bid and ask prices"""
+        cfmm_instance = cls.get_cfmm_instance(symbol)
+        if cfmm_instance is None:
+            return None, None
+        return cfmm_instance.calculate_bid_ask()
+    
+    @classmethod
+    def get_cfmm_depth(cls, symbol):
+        """Static interface to get CFMM depth"""
+        cfmm_instance = cls.get_cfmm_instance(symbol)
+        if cfmm_instance is None:
+            return 0.0
+        return cfmm_instance.depth_at_1pct()
+    
+    @classmethod
+    def check_cfmm_reset_needed(cls, symbol):
+        """Static interface to check if CFMM needs reset"""
+        cfmm_instance = cls.get_cfmm_instance(symbol)
+        if cfmm_instance is None:
+            return False
+        return cfmm_instance.needs_reset()
+    
+    @classmethod
+    def execute_cfmm_trade_static(cls, symbol, agent_id, quantity, is_buy_order, current_time=None):
+        """
+        Static interface to execute CFMM trade
+        Returns (executed_quantity, execution_price, fee_paid) or (0, 0, 0) if failed
+        """
+        cfmm_instance = cls.get_cfmm_instance(symbol)
+        if cfmm_instance is None:
+            return 0, 0, 0
         
-        # Market data subscribers
-        self.subscription_dict = {}
-        
+        # Use instance method but add static recording
+        return cfmm_instance.execute_trade(agent_id, quantity, is_buy_order)
+    
     def get_pool_price(self):
         """Calculate current pool price (y/x) as per Document 3"""
         if self.x == 0:
@@ -65,11 +158,10 @@ class CFMMAgent(ExchangeAgent):
     
     def calculate_trade_output(self, input_amount, is_buy_order):
         """
-        严格按照实验设计思路计算交易输出
+        修改逻辑：is_buy_order=True 用Y买X，False 卖X得Y
         """
         if is_buy_order:
-            # 买入X用Y：输入Δy，输出Δx
-            # 公式: (x - Δx) * (y + φ*Δy) = k
+            # 用Y买X：输入Δy，输出Δx
             if self.x == 0 or input_amount <= 0:
                 return 0
             
@@ -80,8 +172,7 @@ class CFMMAgent(ExchangeAgent):
             delta_x = self.x - (self.k / (self.y + fee_adjusted_input))
             return max(0, delta_x)
         else:
-            # 卖出X得Y：输入Δx，输出Δy  
-            # 公式: (x + φ*Δx) * (y - Δy) = k
+            # 卖X得Y：输入Δx，输出Δy  
             if self.y == 0 or input_amount <= 0:
                 return 0
             
@@ -94,7 +185,7 @@ class CFMMAgent(ExchangeAgent):
     
     def calculate_effective_price(self, trade_amount, is_buy_order):
         """
-        Calculate effective price for a given trade size following Document 3
+        Calculate effective price for a given trade size
         Returns effective price and price impact percentage
         """
         if trade_amount <= 0:
@@ -102,15 +193,17 @@ class CFMMAgent(ExchangeAgent):
             return pool_price, 0
         
         if is_buy_order:
+            # Buying X with Y: output is Δx, input is Δy
             output = self.calculate_trade_output(trade_amount, True)
             if output == 0:
                 return float('inf'), 1.0
-            effective_price = trade_amount / output
+            effective_price = trade_amount / output  # Δy / Δx
         else:
+            # Selling X for Y: output is Δy, input is Δx  
             output = self.calculate_trade_output(trade_amount, False)
             if output == 0:
                 return 0, 1.0
-            effective_price = output / trade_amount
+            effective_price = output / trade_amount  # Δy / Δx
         
         pool_price = self.get_pool_price()
         if pool_price == 0:
@@ -138,94 +231,77 @@ class CFMMAgent(ExchangeAgent):
     
     def execute_trade(self, agent_id, quantity, is_buy_order):
         """
-        Execute a trade in the CFMM pool following Document 3 formulas
-        Returns: (executed_quantity, execution_price, fee_paid)
+        Execute a trade in the CFMM pool with modified logic
+        Returns: executed_quantity
         """
         # Check if pool needs reset before trade as per Document 3
         if self.needs_reset():
             self.reset_pool()
         
         if is_buy_order:
-            # Buying X with Y: paying Δy, receiving Δx
+            # Buying X with Y: 对于CFMM来说是流出X，收入Y
             if quantity <= 0 or self.x == 0:
-                return 0, 0, 0
+                return 0
             
-            # Calculate output using Document 3 formula
+            # Calculate output using modified formula
             delta_x = self.calculate_trade_output(quantity, True)
             if delta_x <= 0:
-                return 0, 0, 0
+                return 0
             
-            # Apply fee and update reserves
-            phi = 1 - self.fee
-            fee_amount = quantity * self.fee
-            actual_input = quantity * phi
-            
-            # Update reserves: (x - Δx) * (y + φ*Δy) = k
             new_x = self.x - delta_x
-            new_y = self.y + actual_input
-            new_k = new_x * new_y
+            new_y = self.k / new_x
             
             # Update state
             self.x = new_x
             self.y = new_y
-            self.k = new_k
             
-            execution_price = quantity / delta_x
-            log_print(f"CFMM {self.symbol}: BUY {delta_x:.4f} X for {quantity:.2f} Y, price: {execution_price:.4f}, fee: {fee_amount:.2f}")
+            log_print(f"CFMM {self.symbol}: BUY {delta_x:.4f} X for {quantity:.2f} Y")
             
-            return delta_x, execution_price, fee_amount
+            return delta_x
             
         else:
-            # Selling X for Y: paying Δx, receiving Δy
+            # Selling X for Y: 对于CFMM来说是收入X，流出Y
             if quantity <= 0 or self.y == 0:
-                return 0, 0, 0
+                return 0
             
-            # Calculate output using Document 3 formula
+            # Calculate output using modified formula
             delta_y = self.calculate_trade_output(quantity, False)
             if delta_y <= 0:
-                return 0, 0, 0
-            
-            # Apply fee and update reserves
-            phi = 1 - self.fee
-            fee_amount = delta_y * self.fee
-            actual_output = delta_y * phi
+                return 0
             
             # Update reserves: (x + φ*Δx) * (y - Δy) = k
-            new_x = self.x + (quantity * phi)
             new_y = self.y - delta_y
-            new_k = new_x * new_y
+            new_x = self.k / new_y
             
             # Update state
             self.x = new_x
             self.y = new_y
-            self.k = new_k
             
-            execution_price = delta_y / quantity
-            log_print(f"CFMM {self.symbol}: SELL {quantity:.4f} X for {delta_y:.2f} Y, price: {execution_price:.4f}, fee: {fee_amount:.2f}")
+            log_print(f"CFMM {self.symbol}: SELL {quantity:.4f} X for {delta_y:.2f} Y")
             
-            return quantity, execution_price, fee_amount
+            return delta_y
     
     def depth_at_1pct(self):
-        """严格按照实验设计思路计算深度"""
+        """Calculate depth at 1% price change"""
         if self.x == 0 or self.y == 0:
             return 0.0
         
         current_price = self.get_pool_price()
         
-        # 压价 1% 需要买入的 Δx
+        # 压价 1% 需要买入的 Δx (用Y买X)
         delta_x_buy = self.x * (1/0.99 - 1)
         
-        # 抬价 1% 需要卖出的 Δy  
-        delta_y_sell = self.y * (1.01 - 1)
+        # 抬价 1% 需要卖出的 Δx (卖X得Y)  
+        delta_x_sell = self.x * (1.01 - 1)
         
         # 取双向最小作为深度
-        depth = min(delta_x_buy, delta_y_sell)
+        depth = min(delta_x_buy, delta_x_sell)
         
         return max(0, depth)
     
     def get_market_data(self, levels=1):
         """
-        Get current market data following Document 3 specifications
+        Get current market data
         """
         bid_price, ask_price = self.calculate_bid_ask()
         depth = self.depth_at_1pct()
@@ -239,7 +315,7 @@ class CFMMAgent(ExchangeAgent):
             'asks': asks,
             'last_trade': self.get_pool_price(),
             'pool_reserves': (self.x, self.y),
-            'fee_rate': self.fee,  # Include fee rate as per Document 3
+            'fee_rate': self.fee,
             'depth_1pct': depth
         }
     
@@ -251,16 +327,14 @@ class CFMMAgent(ExchangeAgent):
             self.handleCFMMTrade(currentTime, msg)
         elif msg.body['msg'] == "CFMM_MARKET_DATA_REQUEST":
             self.handleCFMMMarketData(currentTime, msg)
-        elif msg.body['msg'] == "CFMM_SUBSCRIPTION_REQUEST":
-            self.handleCFMMSubscription(currentTime, msg)
     
     def handleCFMMTrade(self, currentTime, msg):
         """
-        Handle trade requests from MarketOnlyAgent following Document 3
+        Handle trade requests from MarketOnlyAgent with modified logic
         """
         agent_id = msg.body['sender']
         symbol = msg.body['symbol']
-        quantity = msg.body['quantity']  # This is the trade amount in quote currency (Y)
+        quantity = msg.body['quantity']  # Trade amount in the currency being spent
         is_buy_order = msg.body['is_buy_order']
         max_slippage = msg.body.get('max_slippage', 0.05)
         
@@ -268,27 +342,12 @@ class CFMMAgent(ExchangeAgent):
             log_print(f"CFMM {self.symbol}: Trade request discarded for wrong symbol: {symbol}")
             return
         
-        # Convert quote currency amount to base currency if needed
-        # For CFMM, we need to handle the trade based on the pool mechanics
-        if is_buy_order:
-            # Buying X with Y: quantity is in Y (quote currency)
-            # We'll execute the trade directly with the Y amount
-            trade_amount_y = quantity
-        else:
-            # Selling X for Y: quantity is the value in Y we want to get
-            # We need to calculate how much X to sell to get this Y amount
-            current_price = self.get_pool_price()
-            if current_price > 0:
-                trade_amount_x = quantity / current_price
-            else:
-                trade_amount_x = 0
-            trade_amount_y = quantity
+        # For CFMM trades, quantity is always in the currency being spent
+        # is_buy_order=True: spending Y to buy X, quantity is in Y
+        # is_buy_order=False: spending X to get Y, quantity is in X
         
         # Calculate price impact to check slippage
-        effective_price, price_impact = self.calculate_effective_price(
-            trade_amount_y if is_buy_order else trade_amount_x, 
-            is_buy_order
-        )
+        effective_price, price_impact = self.calculate_effective_price(quantity, is_buy_order)
         
         if price_impact > max_slippage:
             log_print(f"CFMM {self.symbol}: Trade rejected due to slippage {price_impact:.2%} > {max_slippage:.2%}")
@@ -300,13 +359,8 @@ class CFMMAgent(ExchangeAgent):
             }))
             return
         
-        # Execute trade - using the Y amount for both buy and sell
-        # For sells, we calculate the equivalent X amount inside execute_trade
-        executed_qty, execution_price, fee = self.execute_trade(
-            agent_id, 
-            trade_amount_y,  # Always use Y amount for consistency
-            is_buy_order
-        )
+        # Execute trade
+        executed_qty, execution_price, fee = self.execute_trade(agent_id, quantity, is_buy_order)
         
         if executed_qty == 0:
             log_print(f"CFMM {self.symbol}: Trade execution failed")
@@ -316,18 +370,6 @@ class CFMMAgent(ExchangeAgent):
                 "reason": "execution_failed"
             }))
             return
-        
-        # Record transaction
-        self.transaction_history.append({
-            'time': currentTime,
-            'agent_id': agent_id,
-            'symbol': symbol,
-            'side': 'BUY' if is_buy_order else 'SELL',
-            'quantity': executed_qty,
-            'price': execution_price,
-            'fee': fee,
-            'input_amount': quantity
-        })
         
         # Send confirmation
         self.sendMessage(agent_id, Message({
@@ -339,9 +381,6 @@ class CFMMAgent(ExchangeAgent):
             "fee": fee,
             "slippage": price_impact
         }))
-        
-        # Notify subscribers of market data update
-        self.publishCFMMData()
     
     def handleCFMMMarketData(self, currentTime, msg):
         """Handle market data requests"""
@@ -356,57 +395,3 @@ class CFMMAgent(ExchangeAgent):
             "symbol": symbol,
             "data": market_data
         }))
-    
-    def handleCFMMSubscription(self, currentTime, msg):
-        """Handle market data subscription requests"""
-        agent_id = msg.body['sender']
-        symbol = msg.body['symbol']
-        freq = msg.body.get('freq', 0)  # Default: all updates
-        
-        if agent_id not in self.subscription_dict:
-            self.subscription_dict[agent_id] = {}
-        
-        self.subscription_dict[agent_id][symbol] = {
-            'freq': freq,
-            'last_update': currentTime
-        }
-    
-    def publishCFMMData(self):
-        """Publish market data to subscribers"""
-        market_data = self.get_market_data()
-        
-        for agent_id, subscriptions in self.subscription_dict.items():
-            for symbol, params in subscriptions.items():
-                freq = params['freq']
-                last_update = params['last_update']
-                
-                if freq == 0 or (self.currentTime - last_update).delta >= freq:
-                    self.sendMessage(agent_id, Message({
-                        "msg": "CFMM_MARKET_DATA",
-                        "symbol": symbol,
-                        "data": market_data
-                    }))
-                    self.subscription_dict[agent_id][symbol]['last_update'] = self.currentTime
-    
-    def get_transacted_volume(self, lookback_period='10min'):
-        """Calculate transacted volume for given lookback period"""
-        lookback_delta = pd.Timedelta(lookback_period)
-        cutoff_time = self.currentTime - lookback_delta
-        
-        volume = sum(tx['quantity'] for tx in self.transaction_history 
-                    if tx['time'] >= cutoff_time)
-        
-        return volume
-    
-    def get_pool_statistics(self):
-        """Get comprehensive pool statistics"""
-        return {
-            'x_reserve': self.x,
-            'y_reserve': self.y,
-            'pool_price': self.get_pool_price(),
-            'constant_product': self.k,
-            'fee_rate': self.fee,
-            'reset_threshold': self.reset_threshold,
-            'transaction_count': len(self.transaction_history),
-            'total_volume': sum(tx['quantity'] for tx in self.transaction_history)
-        }

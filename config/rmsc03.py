@@ -17,6 +17,7 @@ from Kernel import Kernel
 from util import util
 from util.order import LimitOrder
 from util.oracle.SparseMeanRevertingOracle import SparseMeanRevertingOracle
+from util.oracle.ExternalFileOracle import ExternalFileOracle
 
 from agent.ExchangeAgent import ExchangeAgent
 from agent.NoiseAgent import NoiseAgent
@@ -121,7 +122,11 @@ parser.add_argument('--fund-vol',
                     default=1e-8,
                     help='Volatility of fundamental time series.'
                     )
-
+parser.add_argument('--fundamental-file-path',
+                    type=str,
+                    default='data/fundamentals.csv',
+                    help='Path to fundamental time series data.'
+                    )
 args, remaining_args = parser.parse_known_args()
 
 if args.config_help:
@@ -161,17 +166,26 @@ sigma_n = r_bar / 10
 kappa = 1.67e-15
 lambda_a = 7e-11
 
-# Oracle
-symbols = {symbol: {'r_bar': r_bar,
-                    'kappa': 1.67e-16,
-                    'sigma_s': 0,
-                    'fund_vol': args.fund_vol,
-                    'megashock_lambda_a': 2.77778e-18,
-                    'megashock_mean': 1e3,
-                    'megashock_var': 5e4,
-                    'random_state': np.random.RandomState(seed=np.random.randint(low=0, high=2 ** 32, dtype='uint64'))}}
+# # Oracle
+# symbols = {symbol: {'r_bar': r_bar,
+#                     'kappa': 1.67e-16,
+#                     'sigma_s': 0,
+#                     'fund_vol': args.fund_vol,
+#                     'megashock_lambda_a': 2.77778e-18,
+#                     'megashock_mean': 1e3,
+#                     'megashock_var': 5e4,
+#                     'random_state': np.random.RandomState(seed=np.random.randint(low=0, high=2 ** 32, dtype='uint64'))}}
 
-oracle = SparseMeanRevertingOracle(mkt_open, mkt_close, symbols)
+# oracle = SparseMeanRevertingOracle(mkt_open, mkt_close, symbols)
+
+# Oracle
+symbols = {
+    symbol : {
+        'fundamental_file_path': args.fundamental_file_path,
+        'random_state': np.random.RandomState(seed=np.random.randint(low=0, high=2 ** 32, dtype='uint64'))
+    }
+}
+oracle = ExternalFileOracle(symbols)
 
 # 1) Exchange Agent
 
@@ -334,7 +348,6 @@ agents.extend([MarketOnlyAgent(id=j,
                              wake_up_freq='60s',
                              log_orders=log_orders,
                              starting_cash=starting_cash,
-                             trade_direction=(j < agent_count + num_market_only_agents//2),
                              random_state=np.random.RandomState(seed=np.random.randint(low=0, high=2 ** 32,
                                                                                        dtype='uint64')))
                for j in range(agent_count, agent_count + num_market_only_agents)])

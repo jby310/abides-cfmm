@@ -240,8 +240,8 @@ class ExperimentRunner:
 
 def main():
     # 基础命令模板
-    base_cmd = """python -u abides.py -c rmsc03 -t ETH -d 20251028 -s 1235 -l rmsc03_two_hour --end-time 09:40:00
-python -u abides.py -c rmsc04 -t ETH -d 20251028 -s 1235 -l rmsc04_two_hour --end-time 09:40:00 -k 100000000 --fee 0.003
+    base_cmd = """python -u abides.py -c rmsc03 -t ETH -d 20251114 -s 1235 -l rmsc03_two_hour --start-time 09:30:00 --end-time 09:45:00 --fundamental-file-path data/ETH.xlsx
+python -u abides.py -c rmsc04 -t ETH -d 20251114 -s 1235 -l rmsc04_two_hour --start-time 09:30:00 --end-time 09:45:00 -k 10000000 --fee 0.008 --fundamental-file-path data/ETH.xlsx
 python ttest.py"""
     
     # 定义参数范围（先使用小范围测试）
