@@ -17,6 +17,20 @@ class ExperimentRunner:
         self.results = []
         self.control_group_run = IS_CONTROL_GROUP_RUN  # 标记对照组是否已运行
         
+    def replace_parameter(self, cmd, param_name, param_value):
+        """通用参数替换函数"""
+        # 处理 --param value 格式
+        pattern1 = rf'{param_name}\s+\S+'
+        replacement1 = f'{param_name} {param_value}'
+        cmd = re.sub(pattern1, replacement1, cmd)
+        
+        # 处理 --param=value 格式
+        pattern2 = rf'{param_name}=\S+'
+        replacement2 = f'{param_name}={param_value}'
+        cmd = re.sub(pattern2, replacement2, cmd)
+        
+        return cmd
+        
     def run_control_group(self):
         """运行对照组（只需运行一次）"""
         if self.control_group_run:
@@ -65,7 +79,11 @@ class ExperimentRunner:
             
             # 提取实验组的命令（第二、三条命令）
             lines = [line.strip() for line in self.base_cmd.split('\n') if line.strip()]
-            cmd2 = lines[1].replace('-k 100000000', f'-k {int(k_value)}').replace('--fee 0.003', f'--fee {fee_value}')
+            cmd2 = lines[1]
+            
+            # 使用通用参数替换函数
+            cmd2 = self.replace_parameter(cmd2, '-k', int(k_value))
+            cmd2 = self.replace_parameter(cmd2, '--fee', fee_value)
             
             # 修改ttest命令，添加结果目录参数
             cmd3 = f"python ttest.py --output_dir {result_dir}"
@@ -240,13 +258,13 @@ class ExperimentRunner:
 
 def main():
     # 基础命令模板
-    base_cmd = """python -u abides.py -c rmsc03 -t ETH -d 20251114 -s 1235 -l rmsc03_two_hour --start-time 09:30:00 --end-time 09:45:00 --fundamental-file-path data/ETH.xlsx
-python -u abides.py -c rmsc04 -t ETH -d 20251114 -s 1235 -l rmsc04_two_hour --start-time 09:30:00 --end-time 09:45:00 -k 10000000 --fee 0.008 --fundamental-file-path data/ETH.xlsx
+    base_cmd = """python -u abides.py -c rmsc03 -t ETH -d 20251114 -s 1235 -l rmsc03_two_hour --start-time 09:30:00 --end-time 09:45:00 --fundamental-file-path data/ETH1.xlsx 
+python -u abides.py -c rmsc04 -t ETH -d 20251114 -s 1235 -l rmsc04_two_hour --start-time 09:30:00 --end-time 09:45:00 -k 10000000 --fee 0.01 --max-slippage 0.1 --fundamental-file-path data/ETH1.xlsx
 python ttest.py"""
     
     # 定义参数范围（先使用小范围测试）
-    k_values = [1e7, 1e8]  # 池规模参数
-    fee_values = [0.003, 0.008]  # 手续费参数
+    k_values = [1e3, 1e5, 1e7]  # 池规模参数
+    fee_values = [0.001, 0.01, 0.1]  # 手续费参数
     
     # 创建实验运行器
     runner = ExperimentRunner(base_cmd)

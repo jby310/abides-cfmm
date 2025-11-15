@@ -30,8 +30,9 @@ class CFMMAgent(ExchangeAgent):
         self.reset_threshold = reset_threshold  # Price deviation threshold for reset
         
         # Track initial values for reset as per Document 3
-        self.initial_x = np.sqrt(initial_k)
-        self.initial_y = np.sqrt(initial_k)
+        self.exchange_rate = 3.5
+        self.initial_x = np.sqrt(initial_k / self.exchange_rate)
+        self.initial_y = self.initial_x * self.exchange_rate
         self.initial_k = initial_k
         self.initial_price = self.initial_y / self.initial_x
 
@@ -221,13 +222,20 @@ class CFMMAgent(ExchangeAgent):
             
         price_deviation = abs(current_price - self.initial_price) / self.initial_price
         return price_deviation > self.reset_threshold
-    
+
+    @classmethod
+    def reset_cfmm_pool(cls, symbol):
+        ''' Static interface to reset CFMM pool'''
+        cfmm_instance = cls.get_cfmm_instance(symbol)
+        if cfmm_instance is None:
+            return
+        cfmm_instance.reset_pool()
+
     def reset_pool(self):
         """Reset pool to initial values as per Document 3"""
         log_print(f"CFMM {self.symbol}: Resetting pool from ({self.x:.2f}, {self.y:.2f}) to ({self.initial_x:.2f}, {self.initial_y:.2f})")
         self.x = self.initial_x
         self.y = self.initial_y
-        self.k = self.initial_k
     
     def execute_trade(self, agent_id, quantity, is_buy_order):
         """

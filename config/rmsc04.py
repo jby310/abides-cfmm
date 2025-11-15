@@ -139,6 +139,11 @@ parser.add_argument('--fundamental-file-path',
                     default='data/fundamentals.csv',
                     help='Path to fundamental time series data.'
                     )
+parser.add_argument('--max-slippage',
+                    type=float,
+                    default=0.1,
+                    help='Threshold for resetting the CFMM Agent\'s parameters.')
+
 args, remaining_args = parser.parse_known_args()
 
 if args.config_help:
@@ -354,7 +359,7 @@ agent_count += 1
 # 7) MarketOnlyAgents 5229-5428
 from agent.MarketOnlyAgent import MarketOnlyAgent
 
-num_market_only_agents = 100
+num_market_only_agents = 50
 agents.extend([MarketOnlyAgent(id=j,
                              name="MARKET_ONLY_AGENT_{}".format(j),
                              type="MarketOnlyAgent",
@@ -362,6 +367,8 @@ agents.extend([MarketOnlyAgent(id=j,
                              wake_up_freq='60s',
                              log_orders=log_orders,
                              starting_cash=starting_cash,
+                             hybrid=True,
+                             max_slippage=args.max_slippage,
                              random_state=np.random.RandomState(seed=np.random.randint(low=0, high=2 ** 32,
                                                                                        dtype='uint64')))
                for j in range(agent_count, agent_count + num_market_only_agents)])

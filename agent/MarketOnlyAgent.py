@@ -6,6 +6,7 @@ import numpy as np
 import random
 from copy import deepcopy
 from agent.CFMMAgent import CFMMAgent
+from util.order.LimitOrder import LimitOrder
 
 class MarketOnlyAgent(TradingAgent):
     """
@@ -16,7 +17,7 @@ class MarketOnlyAgent(TradingAgent):
     
     def __init__(self, id, name, type, symbol, starting_cash=100000, 
                  max_slippage=0.05, wake_up_freq='60s', min_trade_size=100,
-                 log_orders=False, random_state=None):
+                 log_orders=False, random_state=None, hybrid=False):
         
         super().__init__(id, name, type, starting_cash=starting_cash,
                          log_orders=log_orders, random_state=random_state)
@@ -29,6 +30,7 @@ class MarketOnlyAgent(TradingAgent):
         # Asset holdings (X and Y) - initial: all in Y (cash), no X
         self.x_holdings = 0  # Base asset (e.g., ETH)
         self.y_holdings = starting_cash  # Quote asset (e.g., USDT)
+        self.holdings[self.symbol] = 0
         
         # Venue identifiers
         self.clob_exchange_id = None
@@ -46,6 +48,12 @@ class MarketOnlyAgent(TradingAgent):
         # CLOB order book management
         self.remaining_clob_bids = []
         self.remaining_clob_asks = []
+
+        # 判断CFMM资产池是否需要重置
+        self.reset_buy = False
+        self.reset_sell = False
+
+        self.hybrid = hybrid
 
     def kernelStarting(self, startTime):
         super().kernelStarting(startTime)
@@ -117,6 +125,13 @@ class MarketOnlyAgent(TradingAgent):
             return
         
         # Execute trade following the detailed flow chart logic
+        # 在每个时刻交易之前，判断是否需要重置CFMM池子。
+        # need_reset = CFMMAgent.check_cfmm_reset_needed(self.symbol)
+        need_reset = self.reset_buy and self.reset_sell
+        if need_reset:
+            CFMMAgent.reset_cfmm_pool(self.symbol)
+            log_print(f"MarketOnlyAgent {self.id}: CFMM pool reset for {self.symbol}")
+
         self.executeTradeFlowChart(currentTime, is_buy_order, max_trade_amount)
 
     def handleCLOBData(self, currentTime, msg):
@@ -149,6 +164,12 @@ class MarketOnlyAgent(TradingAgent):
         best_price = min([p for p in [clob_price, cfmm_price] if p is not None]) if is_buy_order else max([p for p in [clob_price, cfmm_price] if p is not None])
         max_slippage_price = best_price * (1 + self.max_slippage) if is_buy_order else best_price * (1 - self.max_slippage)
         
+        if self.hybrid:
+            if is_buy_order and cfmm_price > max_slippage_price:
+                self.reset_buy = True 
+            elif not is_buy_order and cfmm_price < max_slippage_price:
+                self.reset_sell = True
+
         log_print(f"MarketOnlyAgent {self.id}: Best price: {best_price:.4f}, Slippage limit: {max_slippage_price:.4f}")
         
         # Main trading loop
@@ -190,8 +211,6 @@ class MarketOnlyAgent(TradingAgent):
                 else:
                     log_print(f"MarketOnlyAgent {self.id}: Trade failed on {best_venue}")
         
-        # Trading complete
-        self.finalizeTradingCycle(currentTime, remaining_amount, max_trade_amount)
 
     def getCurrentBestPrices(self, is_buy_order):
         """Get current best prices from both venues"""
@@ -304,6 +323,43 @@ class MarketOnlyAgent(TradingAgent):
             else:
                 return delta_x
                 
+    def placeLimitOrder (self, symbol, quantity, is_buy_order, limit_price, order_id=None, ignore_risk = True, tag = None):
+        order = LimitOrder(self.id, self.currentTime, symbol, quantity, is_buy_order, limit_price, order_id, tag)
+
+        if quantity > 0:
+            # Test if this order can be permitted given our at-risk limits.
+            new_holdings = self.holdings.copy()
+
+            q = order.quantity if order.is_buy_order else -order.quantity
+
+            if order.symbol in new_holdings: new_holdings[order.symbol] += q
+            else: new_holdings[order.symbol] = q
+
+            # If at_risk is lower, always allow.  Otherwise, new_at_risk must be below starting cash.
+            if not ignore_risk:
+                # Compute before and after at-risk capital.
+                at_risk = self.markToMarket(self.holdings) - self.holdings['CASH']
+                new_at_risk = self.markToMarket(new_holdings) - new_holdings['CASH']
+
+                if (new_at_risk > at_risk) and (new_at_risk > self.starting_cash):
+                    log_print ("TradingAgent ignored limit order due to at-risk constraints: {}\n{}", order, self.fmtHoldings(self.holdings))
+                    return
+
+            # Copy the intended order for logging, so any changes made to it elsewhere
+            # don't retroactively alter our "as placed" log of the order.  Eventually
+            # it might be nice to make the whole history of the order into transaction
+            # objects inside the order (we're halfway there) so there CAN be just a single
+            # object per order, that never alters its original state, and eliminate all these copies.
+            self.orders[order.order_id] = deepcopy(order)
+            self.sendMessage(self.exchangeID, Message({ "msg" : "LIMIT_ORDER", "sender": self.id,
+                                                        "order" : order })) 
+
+            # Log this activity.
+            if self.log_orders: self.logEvent('ORDER_SUBMITTED', order.to_dict())
+
+        else:
+            log_print ("TradingAgent ignored limit order of quantity zero: {}", order)
+
     def executeCLOBTrade(self, currentTime, is_buy_order, amount, max_slippage_price):
         """Execute CLOB trade with modified logic - only process first level at a time"""
         order_book = self.remaining_clob_asks if is_buy_order else self.remaining_clob_bids
@@ -397,9 +453,13 @@ class MarketOnlyAgent(TradingAgent):
             if is_buy_order:
                 self.x_holdings += executed_qty  # Receive X
                 self.y_holdings -= amount  # Spend Y
+                self.holdings[self.symbol] += executed_qty
+                self.holdings['CASH'] -= amount
             else:
                 self.x_holdings -= amount  # Spend X  
                 self.y_holdings += executed_qty  # Receive Y
+                self.holdings[self.symbol] -= amount
+                self.holdings['CASH'] += executed_qty
             
             log_print(f"MarketOnlyAgent {self.id}: Updated holdings - X: {self.x_holdings:.2f}, Y: {self.y_holdings:.2f}")
             
@@ -430,35 +490,6 @@ class MarketOnlyAgent(TradingAgent):
                 self.x_holdings -= quantity  # Spend X
                 self.y_holdings += quantity * price  # Receive Y
                 
-        else:  # CFMM_TRADE_EXECUTED
-            quantity = msg.body['quantity']
-            price = msg.body['price']
-            is_buy_order = msg.body['is_buy_order']
-            
-            # Holdings already updated in executeCFMMTrade for CFMM trades
-        
-        # Handle pending CFMM trade continuation
-        if hasattr(self, 'pending_cfmm_trade'):
-            trade_amount = self.pending_cfmm_trade['amount']
-            remaining_amount = self.pending_cfmm_trade['remaining_amount']
-            remaining_amount -= trade_amount
-            log_print(f"MarketOnlyAgent {self.id}: CFMM trade executed, remaining: {remaining_amount:.2f}")
-            
-            del self.pending_cfmm_trade
-            
-            # Continue trading with updated CFMM data
-            if remaining_amount > self.min_trade_size:
-                self.pending_queries = 1
-                self.continue_trade_state = {
-                    'currentTime': currentTime,
-                    'is_buy_order': is_buy_order,
-                    'remaining_amount': remaining_amount,
-                }
-                return
-            else:
-                self.finalizeTradingCycle(currentTime, remaining_amount, 0)
-                return
-        
         log_print(f"MarketOnlyAgent {self.id}: Trade executed - {quantity} @ {price:.4f}")
         log_print(f"MarketOnlyAgent {self.id}: Updated holdings - X: {self.x_holdings:.2f}, Y: {self.y_holdings:.2f}")
 
@@ -467,23 +498,9 @@ class MarketOnlyAgent(TradingAgent):
         venue = 'CLOB' if msg.body['msg'] == 'ORDER_REJECTED' else 'CFMM'
         reason = msg.body.get('reason', 'unknown')
         log_print(f"MarketOnlyAgent {self.id}: Trade rejected by {venue} - Reason: {reason}")
-        self.finalizeTradingCycle(currentTime, 0, 0)
 
-    def finalizeTradingCycle(self, currentTime, remaining_amount, max_trade_amount):
-        """Finalize the trading cycle"""
-        if remaining_amount < max_trade_amount:
-            log_print(f"MarketOnlyAgent {self.id}: Trading completed. Total executed: {max_trade_amount - remaining_amount:.2f}, Remaining: {remaining_amount:.2f}")
-        else:
-            log_print(f"MarketOnlyAgent {self.id}: No trades executed")
-        
-        self.state = 'AWAITING_WAKEUP'
-        self.setWakeup(currentTime + self.getWakeFrequency())
-        
-        # Clean up any pending state
-        if hasattr(self, 'pending_cfmm_trade'):
-            del self.pending_cfmm_trade
-        if hasattr(self, 'continue_trade_state'):
-            del self.continue_trade_state
+    # def getWakeFrequency(self):
+    #     return pd.Timedelta(self.wake_up_freq)
 
     def getWakeFrequency(self):
-        return pd.Timedelta(self.wake_up_freq)
+        return pd.Timedelta(self.random_state.randint(low=30, high=100), unit='s')
