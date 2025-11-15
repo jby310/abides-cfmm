@@ -31,7 +31,7 @@ class NoiseAgent(TradingAgent):
         # units have passed.
         self.prev_wake_time = None
 
-        self.size = np.random.randint(20, 50)
+        self.size = np.random.randint(10, 30)
 
     def kernelStarting(self, startTime):
         # self.kernel is set in Agent.kernelInitializing()

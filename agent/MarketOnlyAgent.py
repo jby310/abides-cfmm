@@ -16,7 +16,7 @@ class MarketOnlyAgent(TradingAgent):
     """
     
     def __init__(self, id, name, type, symbol, starting_cash=100000, 
-                 max_slippage=0.05, wake_up_freq='60s', min_trade_size=100,
+                 max_slippage=0.05, wake_up_freq='60s', min_trade_size=10,
                  log_orders=False, random_state=None, hybrid=False):
         
         super().__init__(id, name, type, starting_cash=starting_cash,
@@ -211,7 +211,6 @@ class MarketOnlyAgent(TradingAgent):
                 else:
                     log_print(f"MarketOnlyAgent {self.id}: Trade failed on {best_venue}")
         
-
     def getCurrentBestPrices(self, is_buy_order):
         """Get current best prices from both venues"""
         clob_price = None
@@ -375,16 +374,14 @@ class MarketOnlyAgent(TradingAgent):
         
         total_quantity = 0
         remaining_amount = amount
-        
+        # TODO : remaining_amount -= level_value (X)
         if is_buy_order:
             # Buying X: amount is in Y (cost), convert to X quantity
-            level_value = price * quantity
-            
-            if level_value <= remaining_amount:
+            if quantity <= remaining_amount:
                 # Can buy the entire first level
                 self.placeLimitOrder(self.symbol, quantity, is_buy_order, price)
                 total_quantity += quantity
-                remaining_amount -= level_value
+                remaining_amount -= quantity
                 # Remove the first level since it's fully executed
                 del order_book[0]
             else:

@@ -402,7 +402,7 @@ class TradingAgent(FinancialAgent):
     else:
       self.holdings[sym] = qty
 
-    if self.holdings[sym] == 0: del self.holdings[sym]
+    # if self.holdings[sym] == 0: del self.holdings[sym]
 
     # As with everything else, CASH holdings are in CENTS.
     self.holdings['CASH'] -= (qty * order.fill_price)

@@ -242,9 +242,9 @@ class CFMMAgent(ExchangeAgent):
         Execute a trade in the CFMM pool with modified logic
         Returns: executed_quantity
         """
-        # Check if pool needs reset before trade as per Document 3
-        if self.needs_reset():
-            self.reset_pool()
+        # # Check if pool needs reset before trade as per Document 3
+        # if self.needs_reset():
+        #     self.reset_pool()
         
         if is_buy_order:
             # Buying X with Y: 对于CFMM来说是流出X，收入Y
