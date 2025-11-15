@@ -258,13 +258,13 @@ class ExperimentRunner:
 
 def main():
     # 基础命令模板
-    base_cmd = """python -u abides.py -c rmsc03 -t ETH -d 20251114 -s 1235 -l rmsc03_two_hour --start-time 09:30:00 --end-time 09:45:00 --fundamental-file-path data/ETH1.xlsx 
-python -u abides.py -c rmsc04 -t ETH -d 20251114 -s 1235 -l rmsc04_two_hour --start-time 09:30:00 --end-time 09:45:00 -k 10000000 --fee 0.01 --max-slippage 0.1 --fundamental-file-path data/ETH1.xlsx
+    base_cmd = """python -u abides.py -c rmsc03 -t ETH -d 20251110 -s 1235 -l rmsc03_two_hour --start-time 09:30:00 --end-time 16:00:00 --fundamental-file-path data/ETH1.xlsx 
+python -u abides.py -c rmsc04 -t ETH -d 20251110 -s 1235 -l rmsc04_two_hour --start-time 09:30:00 --end-time 16:00:00 -k 10000000 --fee 0.01 --max-slippage 0.1 --fundamental-file-path data/ETH1.xlsx
 python ttest.py"""
     
     # 定义参数范围（先使用小范围测试）
-    k_values = [1e6, 1e7, 1e8]  # 池规模参数
-    fee_values = [0.001, 0.01, 0.1]  # 手续费参数
+    k_values = [1e5, 1e6, 1e7, 1e8]  # 池规模参数
+    fee_values = [0.001, 0.05, 0.01, 0.05, 0.1]  # 手续费参数
     
     # 创建实验运行器
     runner = ExperimentRunner(base_cmd)

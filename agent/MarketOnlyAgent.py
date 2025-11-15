@@ -189,20 +189,18 @@ class MarketOnlyAgent(TradingAgent):
             # Calculate and execute trade
             trade_amount = self.calculateTradeAmount(best_venue, is_buy_order, best_price, remaining_amount, max_slippage_price)
             
-            if trade_amount < self.min_trade_size:
-                log_print(f"MarketOnlyAgent {self.id}: Trade amount {trade_amount} below minimum, skipping")
+            if trade_amount < self.min_trade_size or trade_amount > remaining_amount:
+                log_print(f"MarketOnlyAgent {self.id}: Trade amount {trade_amount} below minimum, and over holdings, skipping")
                 break
             
             # Execute trade on selected venue
             if best_venue == 'CLOB':
-                executed = self.executeCLOBTrade(currentTime, is_buy_order, trade_amount, max_slippage_price)
-                if executed:
-                    remaining_amount -= trade_amount
+                executed_amount = self.executeCLOBTrade(currentTime, is_buy_order, trade_amount)
+                if executed_amount:
+                    remaining_amount -= executed_amount
                     log_print(f"MarketOnlyAgent {self.id}: Trade executed on {best_venue}, remaining: {remaining_amount:.2f}")
                 else:
                     log_print(f"MarketOnlyAgent {self.id}: Trade failed on {best_venue}")
-                    self.remaining_clob_bids = []
-                    self.remaining_clob_asks = []
             else:  # CFMM
                 executed = self.executeCFMMTrade(currentTime, is_buy_order, trade_amount)
                 if executed:
@@ -236,6 +234,7 @@ class MarketOnlyAgent(TradingAgent):
         
         if clob_price is not None:
             if (is_buy_order and clob_price <= max_slippage_price) or (not is_buy_order and clob_price >= max_slippage_price):
+
                 available_venues.append(('CLOB', clob_price))
         
         if cfmm_price is not None:
@@ -247,48 +246,14 @@ class MarketOnlyAgent(TradingAgent):
     def calculateTradeAmount(self, venue, is_buy_order, price, remaining_amount, max_slippage_price):
         """Calculate how much to trade on a given venue"""
         if venue == 'CLOB':
-            return self.calculateCLOBAmount(is_buy_order, remaining_amount, max_slippage_price)
+            return self.calculateCLOBAmount(is_buy_order)
         else:  # CFMM
             return self.calculateCFMMAmount(is_buy_order, remaining_amount, max_slippage_price)
 
-    def calculateCLOBAmount(self, is_buy_order, remaining_amount, max_slippage_price):
+    def calculateCLOBAmount(self, is_buy_order):
         """Calculate tradable amount on CLOB"""
         order_book = self.remaining_clob_asks if is_buy_order else self.remaining_clob_bids
-        if not order_book:
-            return 0
-        
-        total_tradable = 0
-        current_remaining = remaining_amount
-        
-        for price, quantity in order_book:
-            # Check slippage limit
-            if (is_buy_order and price > max_slippage_price) or (not is_buy_order and price < max_slippage_price):
-                break
-                
-            if is_buy_order:
-                # Buying X: amount is in Y (cost)
-                level_value = price * quantity
-                if level_value <= current_remaining:
-                    total_tradable += level_value
-                    current_remaining -= level_value
-                else:
-                    total_tradable += current_remaining
-                    current_remaining = 0
-                    break
-            else:
-                # Selling X: amount is in X (quantity)
-                if quantity <= current_remaining:
-                    total_tradable += quantity
-                    current_remaining -= quantity
-                else:
-                    total_tradable += current_remaining
-                    current_remaining = 0
-                    break
-                
-            if current_remaining <= 0:
-                break
-        
-        return total_tradable
+        return order_book[0][1] * order_book[0][0] if order_book else 0
 
     def calculateCFMMAmount(self, is_buy_order, remaining_amount, max_slippage_price):
         """Calculate CFMM tradable amount following modified logic"""
@@ -359,77 +324,31 @@ class MarketOnlyAgent(TradingAgent):
         else:
             log_print ("TradingAgent ignored limit order of quantity zero: {}", order)
 
-    def executeCLOBTrade(self, currentTime, is_buy_order, amount, max_slippage_price):
+    def executeCLOBTrade(self, currentTime, is_buy_order, amount):
         """Execute CLOB trade with modified logic - only process first level at a time"""
         order_book = self.remaining_clob_asks if is_buy_order else self.remaining_clob_bids
         if not order_book:
-            return False
+            return 0
         
         # Only process the first level
         price, quantity = order_book[0]
         
-        # Check slippage limit
-        if (is_buy_order and price > max_slippage_price) or (not is_buy_order and price < max_slippage_price):
-            return False
-        
-        total_quantity = 0
-        remaining_amount = amount
-        # TODO : remaining_amount -= level_value (X)
-        if is_buy_order:
-            # Buying X: amount is in Y (cost), convert to X quantity
-            if quantity <= remaining_amount:
-                # Can buy the entire first level
-                self.placeLimitOrder(self.symbol, quantity, is_buy_order, price)
-                total_quantity += quantity
-                remaining_amount -= quantity
-                # Remove the first level since it's fully executed
-                del order_book[0]
-            else:
-                # Can only buy part of the first level
-                partial_quantity = int(remaining_amount / price)
-                if partial_quantity > 0:
-                    self.placeLimitOrder(self.symbol, partial_quantity, is_buy_order, price)
-                    total_quantity += partial_quantity
-                    
-                    remaining_quantity = quantity - partial_quantity
-                    if remaining_quantity > 0:
-                        # Update the first level with remaining quantity
-                        order_book[0] = (price, remaining_quantity)
-                    else:
-                        # Remove the first level if fully executed
-                        del order_book[0]
-                    remaining_amount = 0
-        else:
-            # Selling X: amount is in X (quantity)
-            if quantity <= remaining_amount:
-                # Can sell the entire first level
-                self.placeLimitOrder(self.symbol, quantity, is_buy_order, price)
-                total_quantity += quantity
-                remaining_amount -= quantity
-                # Remove the first level since it's fully executed
-                del order_book[0]
-            else:
-                # Can only sell part of the first level
-                partial_quantity = int(remaining_amount)
-                if partial_quantity > 0:
-                    self.placeLimitOrder(self.symbol, partial_quantity, is_buy_order, price)
-                    total_quantity += partial_quantity
-                    
-                    remaining_quantity = quantity - partial_quantity
-                    if remaining_quantity > 0:
-                        # Update the first level with remaining quantity
-                        order_book[0] = (price, remaining_quantity)
-                    else:
-                        # Remove the first level if fully executed
-                        del order_book[0]
-                    remaining_amount = 0
-        
-        if total_quantity > 0:
+        if quantity <= amount:
+            # Can buy the entire first level
+            self.placeLimitOrder(self.symbol, quantity, is_buy_order, price)
+            # Remove the first level since it's fully executed
+            del order_book[0]
+            
             action = "BUY" if is_buy_order else "SELL"
-            log_print(f"MarketOnlyAgent {self.id}: CLOB {action} executed - {total_quantity} shares, {amount - remaining_amount:.2f} {'Y spent' if is_buy_order else 'X sold'}")
-            return True
-        
-        return False
+            log_print(f"{currentTime}: MarketOnlyAgent {self.id}: CLOB {action} executed - {quantity} shares {'Y spent' if is_buy_order else 'X sold'}")
+            return quantity
+        else:
+            self.placeLimitOrder(self.symbol, amount, is_buy_order, price)
+            del order_book[0]
+
+            action = "BUY" if is_buy_order else "SELL"
+            log_print(f"{currentTime}: MarketOnlyAgent {self.id}: CLOB {action} executed - {quantity} shares {'Y spent' if is_buy_order else 'X sold'}")
+            return amount
 
     def executeCFMMTrade(self, currentTime, is_buy_order, amount):
         """Execute CFMM trade using static method with modified logic"""
