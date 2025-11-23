@@ -1,24 +1,11 @@
-# ABIDES: Agent-Based Interactive Discrete Event Simulation environment
+![image-20200801141651082](framework.png)
 
-> ABIDES is an Agent-Based Interactive Discrete Event Simulation environment. ABIDES is designed from the ground up to support AI agent research in market applications. While simulations are certainly available within trading firms for their own internal use, there are no broadly available high-fidelity market simulation environments. We hope that the availability of such a platform will facilitate AI research in this important area. ABIDES currently enables the simulation of tens of thousands of trading agents interacting with an exchange agent to facilitate transactions. It supports configurable pairwise network latencies between each individual agent as well as the exchange. Our simulator's message-based design is modeled after NASDAQ's published equity trading protocols ITCH and OUCH. 
+当模拟开始时，**Kernel** Wakeup 所有Agent完成各自的初始化，TradingAgent每次被唤醒都会执行一套预设的行为逻辑：
 
-Please see our arXiv paper for preliminary documentation:
+1. 首先是获取数据：
+   - CLOB市场：通过kernel的 MsgQueue”机制与ExchangeAgent之间完成CLOB的市场信息的询问与data结果的传递。
+   - 至于CFMM市场，MarketHybridAgent使用CFMMAgent（继承自ExchangeAgent）提供的一组静态类函数接口来获取相应的cfmm market data信息。
+2. 获取完信息，TradingAgent需要进行决策交易（除了snapshotAgent只负责记录市场快照，其他TradingAgent的交易逻辑见ABIDES原文，MarketHybridAgent因为是混合市场交易，交易逻辑遵循一套固定的Routing method见后文图）
+3. TradingAgent的交易请求会被ExchangeAgent或者CFMMAgent收到并执行，同时更新订单簿Order book和货币池Currency pool里的信息。
 
-https://arxiv.org/abs/1904.12066
-
-Please see the wiki for tutorials and example configurations:
-
-https://github.com/abides-sim/abides/wiki
-https://github.com/abides-sim/abides/wiki/RMSC03
-
-## Quickstart
-```
-mkdir project
-cd project
-
-git clone https://github.com/abides-sim/abides.git
-cd abides
-pip install -r requirements.txt
-```
-cd util/plotting
-python -u liquidity_telemetry.py ../../log/rmsc03_two_hour/EXCHANGE_AGENT.bz2 ../../log/rmsc03_two_hour/ORDERBOOK_ABM_FULL.bz2 -o rmsc03_two_hour.png -c configs/plot_09.30_11.30.json
+TradingAgent 每次被唤醒都会通过SetWakeup 设置下次被唤醒的时间。整个流程在Kernel的调度下，各组件通过消息队列和唤醒机制持续推进，完成每个时刻的市场交易、数据快照。直到Kernel判断当前时间大于mkt_close的时间，终止进程。
