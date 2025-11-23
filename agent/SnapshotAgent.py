@@ -1,13 +1,15 @@
 import pandas as pd
 from agent.TradingAgent import TradingAgent
 from util.util import log_print
+from agent.CFMMAgent import CFMMAgent
 
 class SnapshotAgent(TradingAgent):
-    def __init__(self, id, name, type, symbol, log_orders=False, random_state=None):
+    def __init__(self, id, name, type, symbol, log_orders=False, random_state=None, hybrid=False):
         super().__init__(id, name, type, log_orders=log_orders, random_state=random_state)
         self.symbol = symbol
         self.snapshot_interval = pd.Timedelta(1, unit='s')  # 每秒记录一次
         self.state = 'AWAITING_MARKET_OPEN'
+        self.hybrid = hybrid
 
     def kernelStarting(self, startTime):
         super().kernelStarting(startTime)
@@ -49,20 +51,10 @@ class SnapshotAgent(TradingAgent):
         self.getCurrentSpread(self.symbol, depth=10)
         # 查询交易量
         self.get_transacted_volume(self.symbol, lookback_period='1s')
+
+        
         # 记录当前时间用于后续处理响应
         self.last_snapshot_time = currentTime
-
-        # 找到 CFMM
-        from agent.CFMMAgent import CFMMAgent
-        from message.Message import Message
-        self.cfmm_id = self.kernel.findAgentByType(CFMMAgent)
-        if self.cfmm_id:
-            self.sendMessage(self.cfmm_id, Message({
-                "msg": "CFMM_SUBSCRIPTION_REQUEST",
-                "sender": self.id,
-                "symbol": self.symbol,
-                "freq": 0          # 0 = 每有更新就推送
-            }))
 
     def receiveMessage(self, currentTime, msg):
         super().receiveMessage(currentTime, msg)
@@ -80,14 +72,28 @@ class SnapshotAgent(TradingAgent):
             if bids and asks:
                 best_bid = bids[0][0] if bids else None
                 best_ask = asks[0][0] if asks else None
+                # mid = (best_bid + best_ask) / 2 if best_bid and best_ask else None
                 if best_bid and best_ask:
-                    spread = best_ask - best_bid
-                    self.logEvent('SPREAD', {
-                        'timestamp': currentTime,
-                        'spread': spread,
-                        'best_bid': best_bid,
-                        'best_ask': best_ask
-                    })
+                    spread = (best_ask - best_bid) 
+                    if self.hybrid:
+                        # CFMM快照
+                        # —— 新增 CFMM 指标记录 —— 
+                        cfmm_market_data = CFMMAgent.get_cfmm_market_data(self.symbol)
+                        bids_cfmm, asks_cfmm = cfmm_market_data['bids'], cfmm_market_data['asks']
+                        if bids and asks:
+                            bid_p_cfmm, bid_v = bids_cfmm[0]
+                            ask_p_cfmm, ask_v = asks_cfmm[0]
+
+                        self.logEvent('SPREAD', {
+                            'timestamp': currentTime,
+                            'spread': min(best_ask, ask_p_cfmm) - max(best_bid, bid_p_cfmm),
+                        })
+                    else:
+
+                        self.logEvent('SPREAD', {
+                            'timestamp': currentTime,
+                            'spread': spread,
+                        })
             
             # 计算±1%范围内的流动性
             if bids and asks and best_bid and best_ask:
@@ -100,15 +106,29 @@ class SnapshotAgent(TradingAgent):
                 # 计算卖单流动性（1%范围内）
                 ask_liquidity = sum(vol for price, vol in asks if price <= ask_threshold)
                 
-                self.logEvent('LIQUIDITY_1PCT', {
-                    'timestamp': currentTime,
-                    'mid_price': mid_price,
-                    'bid_liquidity': bid_liquidity,
-                    'ask_liquidity': ask_liquidity,
-                    'bid_threshold': bid_threshold,
-                    'ask_threshold': ask_threshold
-                })
-        
+                depth = min(bid_liquidity, ask_liquidity)
+                if self.hybrid:
+                    self.logEvent('LIQUIDITY_1PCT', {
+                        'timestamp': currentTime,
+                        'mid_price': mid_price,
+                        'bid_liquidity': bid_liquidity,
+                        'ask_liquidity': ask_liquidity,
+                        'bid_threshold': bid_threshold,
+                        'ask_threshold': ask_threshold,
+                        'depth': depth + cfmm_market_data['depth_1pct']
+                    })
+                
+                else:
+                    self.logEvent('LIQUIDITY_1PCT', {
+                        'timestamp': currentTime,
+                        'mid_price': mid_price,
+                        'bid_liquidity': bid_liquidity,
+                        'ask_liquidity': ask_liquidity,
+                        'bid_threshold': bid_threshold,
+                        'ask_threshold': ask_threshold,
+                        'depth': depth
+                    })
+                
         # 处理交易量查询响应
         elif msg.body['msg'] == 'QUERY_TRANSACTED_VOLUME' and hasattr(self, 'last_snapshot_time'):
             symbol = msg.body['symbol']
@@ -116,46 +136,19 @@ class SnapshotAgent(TradingAgent):
                 return
                 
             volume = msg.body['transacted_volume']
-            self.logEvent('VOLUME', {
-                'timestamp': currentTime,
-                'volume': volume
-            })
-
-        # —— 新增 CFMM 指标记录 —— 
-        if msg.body['msg'] == 'CFMM_MARKET_DATA':
-            data = msg.body['data']
-            bids, asks = data['bids'], data['asks']
-            if bids and asks:
-                bid_p, bid_v = bids[0]
-                ask_p, ask_v = asks[0]
-                spread = ask_p - bid_p
-                mid  = (ask_p + bid_p) / 2
-                spread_bps = spread / mid * 10000
-                # 1 % 深度（使用上一篇回复的准确公式）
-                dx_1pct = self.x_reserve * (1/0.99 - 1) if hasattr(self, 'x_reserve') else 0
-                # 也可直接从 data['pool_reserves'] 取
-                x_reserve, y_reserve = data['pool_reserves']
-                dx_1pct = x_reserve * (1/0.99 - 1)
-                depth = min(dx_1pct, x_reserve * (1 - 1/1.01))
-
-                self.logEvent('CFMM_SPREAD', {
+            if self.hybrid:
+                # 成交量（最近 1 秒）
+                volume_cfmm = CFMMAgent.get_transacted_volume_static(self.symbol, '1s')
+                self.logEvent('VOLUME', {
                     'timestamp': currentTime,
-                    'spread_bps': spread_bps,
-                    'best_bid': bid_p,
-                    'best_ask': ask_p
+                    'volume': volume + volume_cfmm
                 })
-                self.logEvent('CFMM_DEPTH_1PCT', {
+            else:
+                self.logEvent('VOLUME', {
                     'timestamp': currentTime,
-                    'depth_eth': depth
+                    'volume': volume
                 })
-
-            # 成交量（最近 1 秒）
-            volume = self.kernel.agents[self.cfmm_id].get_transacted_volume('1s')
-            self.logEvent('CFMM_VOLUME', {
-                'timestamp': currentTime,
-                'volume_eth': volume
-            })
-
+            
     def getWakeFrequency(self):
         return pd.Timedelta(0)  # 初始唤醒频率，实际会动态调整
     

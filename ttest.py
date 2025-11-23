@@ -27,9 +27,9 @@ def second_level_did(hybrid_path, original_path,
             if isinstance(e, dict) and 'spread' in e
         ])),
         depth=('Event', lambda x: np.nanmean([
-            e['bid_liquidity'] + e['ask_liquidity'] 
+            e['depth']
             for e in x 
-            if isinstance(e, dict) and 'bid_liquidity' in e and 'ask_liquidity' in e
+            if isinstance(e, dict) and 'depth' in e
         ])),
         volume=('Event', lambda x: np.nansum([
             e['volume'] for e in x 
@@ -42,9 +42,10 @@ def second_level_did(hybrid_path, original_path,
             if isinstance(e, dict) and 'spread' in e
         ])),
         depth=('Event', lambda x: np.nanmean([
-            e['bid_liquidity'] + e['ask_liquidity'] 
-            for e in x 
-            if isinstance(e, dict) and 'bid_liquidity' in e and 'ask_liquidity' in e
+            # e['bid_liquidity'] + e['ask_liquidity'] 
+            e['depth'] for e in x 
+            if isinstance(e, dict) and 'depth' in e
+            # if isinstance(e, dict) and 'bid_liquidity' in e and 'ask_liquidity' in e
         ])),
         volume=('Event', lambda x: np.nansum([
             e['volume'] for e in x 
@@ -66,15 +67,17 @@ def second_level_did(hybrid_path, original_path,
         for m in metrics
     })
 
-    # 5. 计算差值均值
+    # 5. 计算差值均值和原始均值
     mean_deltas = delta_df.mean()
+    mean_hybrid = merged[[f'h_{m}' for m in metrics]].mean()
+    mean_original = merged[[f'o_{m}' for m in metrics]].mean()
 
     # 6. 配对 t 检验
     t_stats, p_vals = {}, {}
     for m in metrics:
         t_stats[m], p_vals[m] = ttest_rel(merged[f'h_{m}'], merged[f'o_{m}'])
 
-    return delta_df, mean_deltas, pd.Series(t_stats), pd.Series(p_vals)
+    return delta_df, mean_deltas, mean_hybrid, mean_original, pd.Series(t_stats), pd.Series(p_vals)
 
 def main():
     # 解析命令行参数
@@ -91,13 +94,22 @@ def main():
     
     try:
         # 调用函数并获取结果
-        delta_df, mean_deltas, t_stats, p_vals = second_level_did(
+        delta_df, mean_deltas, mean_hybrid, mean_original, t_stats, p_vals = second_level_did(
             hybrid_path=hybrid_path,
             original_path=original_path
         )
         
         # 准备结果数据
         result = {
+            # 原始均值
+            'hybrid_spread_mean': mean_hybrid['h_spread'],
+            'hybrid_depth_mean': mean_hybrid['h_depth'],
+            'hybrid_volume_mean': mean_hybrid['h_volume'],
+            'original_spread_mean': mean_original['o_spread'],
+            'original_depth_mean': mean_original['o_depth'],
+            'original_volume_mean': mean_original['o_volume'],
+            
+            # 差值结果
             'spread_mean': mean_deltas['Δspread'],
             'spread_t': t_stats['spread'],
             'spread_p': p_vals['spread'],
@@ -118,6 +130,15 @@ def main():
         
         # 打印结果（可选）
         print('=== 逐秒配对 t 检验 ===')
+        print('原始均值:')
+        for m in ['spread', 'depth', 'volume']:
+            print(
+                f'{m.capitalize():<7}: '
+                f'hybrid={result[f"hybrid_{m}_mean"]:.4f}, '
+                f'original={result[f"original_{m}_mean"]:.4f}'
+            )
+        
+        print('\n差值结果:')
         for m in ['spread', 'depth', 'volume']:
             print(
                 f'Δ{m.capitalize():<7}: '
@@ -133,6 +154,12 @@ def main():
         # 保存错误信息
         error_result = {
             'error': str(e),
+            'hybrid_spread_mean': 0,
+            'hybrid_depth_mean': 0,
+            'hybrid_volume_mean': 0,
+            'original_spread_mean': 0,
+            'original_depth_mean': 0,
+            'original_volume_mean': 0,
             'spread_mean': 0,
             'spread_t': 0,
             'spread_p': 1,

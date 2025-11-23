@@ -30,7 +30,7 @@ class CFMMAgent(ExchangeAgent):
         self.reset_threshold = reset_threshold  # Price deviation threshold for reset
         
         # Track initial values for reset as per Document 3
-        self.exchange_rate = 3.5
+        self.exchange_rate = 3500
         self.initial_x = np.sqrt(initial_k / self.exchange_rate)
         self.initial_y = self.initial_x * self.exchange_rate
         self.initial_k = initial_k
@@ -42,6 +42,8 @@ class CFMMAgent(ExchangeAgent):
 
         # Register instance for static access
         CFMMAgent._cfmm_instances[symbol] = self
+
+        self.trade_history = []
     
     @classmethod
     def get_cfmm_instance(cls, symbol):
@@ -134,8 +136,37 @@ class CFMMAgent(ExchangeAgent):
             return 0, 0, 0
         
         # Use instance method but add static recording
-        return cfmm_instance.execute_trade(agent_id, quantity, is_buy_order)
+        return cfmm_instance.execute_trade(agent_id, quantity, is_buy_order, current_time)
     
+    @classmethod
+    def get_transacted_volume_static(cls, symbol, lookback_period='10min'):
+        """ Used by any trading agent subclass to query the total transacted volume in a given lookback period """
+        cfmm_instance = cls.get_cfmm_instance(symbol)
+        if cfmm_instance is None:
+            return False
+
+        return cfmm_instance.get_transacted_volume(lookback_period)
+
+
+    def get_transacted_volume(self, lookback_period='1s'):
+        volume = 0
+    
+        # 将lookback_period转换为pandas Timedelta
+        lookback_td = pd.Timedelta(lookback_period)
+        current_time = pd.Timestamp.now()
+        
+        # 遍历交易历史，统计指定时间段内的交易量
+        if self.trade_history is None:
+            for trade in self.trade_history:
+                if current_time - trade['timestamp'] <= lookback_td:
+                    if self.symbol is None or trade['symbol'] == self.symbol:
+                        volume += trade['amount']
+            
+            return volume
+        else:
+            return 0
+
+
     def get_pool_price(self):
         """Calculate current pool price (y/x) as per Document 3"""
         if self.x == 0:
@@ -224,20 +255,24 @@ class CFMMAgent(ExchangeAgent):
         return price_deviation > self.reset_threshold
 
     @classmethod
-    def reset_cfmm_pool(cls, symbol):
+    def reset_cfmm_pool(cls, symbol, reset_price):
         ''' Static interface to reset CFMM pool'''
         cfmm_instance = cls.get_cfmm_instance(symbol)
         if cfmm_instance is None:
             return
-        cfmm_instance.reset_pool()
+        cfmm_instance.reset_pool(reset_price)
 
-    def reset_pool(self):
-        """Reset pool to initial values as per Document 3"""
+    def reset_pool(self, reset_price=None):
+        """Reset pool to CLOB Price"""
         log_print(f"CFMM {self.symbol}: Resetting pool from ({self.x:.2f}, {self.y:.2f}) to ({self.initial_x:.2f}, {self.initial_y:.2f})")
-        self.x = self.initial_x
-        self.y = self.initial_y
+        if reset_price is not None:
+            self.x = np.sqrt(self.k / reset_price)
+            self.y = self.k / self.x
+        else:
+            self.x = self.initial_x
+            self.y = self.initial_y
     
-    def execute_trade(self, agent_id, quantity, is_buy_order):
+    def execute_trade(self, agent_id, quantity, is_buy_order, current_time):
         """
         Execute a trade in the CFMM pool with modified logic
         Returns: executed_quantity
@@ -264,6 +299,11 @@ class CFMMAgent(ExchangeAgent):
             self.y = new_y
             
             log_print(f"CFMM {self.symbol}: BUY {delta_x:.4f} X for {quantity:.2f} Y")
+            self.trade_history.append({
+                'trade_time': current_time,
+                'symbol': self.symbol,
+                'amount': delta_x,
+            })
             
             return delta_x
             
@@ -280,6 +320,12 @@ class CFMMAgent(ExchangeAgent):
             # Update reserves: (x + φ*Δx) * (y - Δy) = k
             new_y = self.y - delta_y
             new_x = self.k / new_y
+            delta_x = new_x - self.x
+            self.trade_history.append({
+                'trade_time': current_time,
+                'symbol': self.symbol,
+                'amount': delta_x,
+            })
             
             # Update state
             self.x = new_x

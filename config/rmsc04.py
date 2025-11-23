@@ -272,10 +272,9 @@ wake_up_freq == How often the market maker wakes up
 """
 
 # each elem of mm_params is tuple (window_size, pov, num_ticks, wake_up_freq, min_order_size)
-# mm_params = [(args.mm_window_size, args.mm_pov, args.mm_num_ticks, args.mm_wake_up_freq, args.mm_min_order_size),
-#              (args.mm_window_size, args.mm_pov, args.mm_num_ticks, args.mm_wake_up_freq, args.mm_min_order_size)
-#              ]
-mm_params = [(args.mm_window_size, args.mm_pov, args.mm_num_ticks, args.mm_wake_up_freq, args.mm_min_order_size)]
+mm_params = [(args.mm_window_size, args.mm_pov, args.mm_num_ticks, args.mm_wake_up_freq, args.mm_min_order_size),
+             (args.mm_window_size, args.mm_pov, args.mm_num_ticks, args.mm_wake_up_freq, args.mm_min_order_size)
+             ]
 
 num_mm_agents = len(mm_params)
 mm_cancel_limit_delay = 50  # 50 nanoseconds
@@ -304,7 +303,7 @@ agent_count += num_mm_agents
 agent_types.extend('POVMarketMakerAgent')
 
 # 5) Momentum Agents # 5203-5227
-num_momentum_agents = 25
+num_momentum_agents = 10
 
 agents.extend([MomentumAgent(id=j,
                              name="MOMENTUM_AGENT_{}".format(j),
@@ -359,7 +358,7 @@ agent_count += 1
 # 7) MarketOnlyAgents 5229-5428
 from agent.MarketOnlyAgent import MarketOnlyAgent
 
-num_market_only_agents = 50
+num_market_only_agents = 25
 agents.extend([MarketOnlyAgent(id=j,
                              name="MARKET_ONLY_AGENT_{}".format(j),
                              type="MarketOnlyAgent",
@@ -378,7 +377,7 @@ agent_types.extend("MarketOnlyAgent")
 # 8) CFMMAgents
 from agent.CFMMAgent import CFMMAgent
 
-num_market_only_agents = 1
+num_cfmm_agents = 1
 agents.extend([CFMMAgent(id=agent_count,
                              name="CFMM_AGENT",
                              type="CFMMAgent",
@@ -391,7 +390,7 @@ agents.extend([CFMMAgent(id=agent_count,
                              initial_k=args.initial_k,
                              fee=args.fee,
                              random_state=np.random.RandomState(seed=np.random.randint(low=0, high=2 ** 32, dtype='uint64')))])
-agent_count += num_market_only_agents
+agent_count += num_cfmm_agents
 agent_types.extend("CFMMAgent")
 
 
@@ -416,6 +415,7 @@ agents.extend([SnapshotAgent(
     type="SnapshotAgent",
     symbol=symbol,
     log_orders=True,
+    hybrid=True,
     random_state=np.random.RandomState(seed=np.random.randint(low=0, high=2**32, dtype='uint64'))
 )])
 agent_types.extend("SnapshotAgent")

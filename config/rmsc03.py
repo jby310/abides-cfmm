@@ -340,7 +340,7 @@ agent_count += 1
 # 7) MarketOnlyAgents 5229-5428W
 from agent.MarketOnlyAgent import MarketOnlyAgent
 
-num_market_only_agents = 50
+num_market_only_agents = 25
 agents.extend([MarketOnlyAgent(id=j,
                              name="MARKET_ONLY_AGENT_{}".format(j),
                              type="MarketOnlyAgent",
@@ -376,6 +376,7 @@ agents.extend([SnapshotAgent(
     type="SnapshotAgent",
     symbol=symbol,
     log_orders=True,
+    hybrid=False,
     random_state=np.random.RandomState(seed=np.random.randint(low=0, high=2**32, dtype='uint64'))
 )])
 agent_types.extend("SnapshotAgent")

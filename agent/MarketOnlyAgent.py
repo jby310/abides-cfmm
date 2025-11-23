@@ -16,7 +16,7 @@ class MarketOnlyAgent(TradingAgent):
     """
     
     def __init__(self, id, name, type, symbol, starting_cash=100000, 
-                 max_slippage=0.05, wake_up_freq='60s', min_trade_size=10,
+                 max_slippage=0.05, wake_up_freq='60s', min_trade_size=0,
                  log_orders=False, random_state=None, hybrid=False):
         
         super().__init__(id, name, type, starting_cash=starting_cash,
@@ -129,8 +129,15 @@ class MarketOnlyAgent(TradingAgent):
         # need_reset = CFMMAgent.check_cfmm_reset_needed(self.symbol)
         need_reset = self.reset_buy and self.reset_sell
         if need_reset:
-            CFMMAgent.reset_cfmm_pool(self.symbol)
+            bid, bid_vol, ask, ask_vol = self.getKnownBidAsk(self.symbol, best=True)
+            if bid and ask:
+                reset_price = (bid + ask) / 2
+            else:
+                reset_price = bid if bid else ask
+            CFMMAgent.reset_cfmm_pool(self.symbol, reset_price)
             log_print(f"MarketOnlyAgent {self.id}: CFMM pool reset for {self.symbol}")
+            self.reset_buy = False
+            self.reset_sell = False
 
         self.executeTradeFlowChart(currentTime, is_buy_order, max_trade_amount)
 
@@ -253,7 +260,10 @@ class MarketOnlyAgent(TradingAgent):
     def calculateCLOBAmount(self, is_buy_order):
         """Calculate tradable amount on CLOB"""
         order_book = self.remaining_clob_asks if is_buy_order else self.remaining_clob_bids
-        return order_book[0][1] * order_book[0][0] if order_book else 0
+        if is_buy_order:
+            return order_book[0][1] * order_book[0][0] if order_book else 0
+        else:
+            return order_book[0][1] if order_book else 0
 
     def calculateCFMMAmount(self, is_buy_order, remaining_amount, max_slippage_price):
         """Calculate CFMM tradable amount following modified logic"""
@@ -341,14 +351,22 @@ class MarketOnlyAgent(TradingAgent):
             
             action = "BUY" if is_buy_order else "SELL"
             log_print(f"{currentTime}: MarketOnlyAgent {self.id}: CLOB {action} executed - {quantity} shares {'Y spent' if is_buy_order else 'X sold'}")
-            return quantity
+            if is_buy_order:
+                excuted_amount = quantity * price
+            else:
+                excuted_amount = quantity
+            return excuted_amount
         else:
             self.placeLimitOrder(self.symbol, amount, is_buy_order, price)
             del order_book[0]
 
             action = "BUY" if is_buy_order else "SELL"
             log_print(f"{currentTime}: MarketOnlyAgent {self.id}: CLOB {action} executed - {quantity} shares {'Y spent' if is_buy_order else 'X sold'}")
-            return amount
+            if is_buy_order:
+                excuted_amount = amount * price
+            else:
+                excuted_amount = amount
+            return excuted_amount
 
     def executeCFMMTrade(self, currentTime, is_buy_order, amount):
         """Execute CFMM trade using static method with modified logic"""
