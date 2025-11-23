@@ -21,7 +21,7 @@ class ExperimentRunner:
         self.control_group_run = IS_CONTROL_GROUP_RUN
         self.results_file = 'experiment_results.csv'
         self.existing_results = self.load_results_from_csv()
-        self.fixed_seeds = [1235, 121314, 91011, 5678]  # 固定的seed值
+        self.fixed_seeds = [1234, 121314, 91011, 5678]  # 固定的seed值
         
     def replace_parameter(self, cmd, param_name, param_value):
         """通用参数替换函数"""
@@ -181,8 +181,8 @@ class ExperimentRunner:
                     lower_bound, upper_bound = continuous_params[param]
                     sample_value = sample[j, k]
                     
-                    if param == 'k':
-                        # k值使用对数均匀采样
+                    if param == 'k' or param == 'fee':
+                        # k值和fee都使用对数均匀采样
                         log_lower = np.log10(lower_bound)
                         log_upper = np.log10(upper_bound)
                         log_value = log_lower + sample_value * (log_upper - log_lower)
@@ -208,7 +208,7 @@ class ExperimentRunner:
                     lower_bound, upper_bound = continuous_params[param]
                     sample_value = sample[j, k]
                     
-                    if param == 'k':
+                    if param == 'k' or param == 'fee':
                         log_lower = np.log10(lower_bound)
                         log_upper = np.log10(upper_bound)
                         log_value = log_lower + sample_value * (log_upper - log_lower)
@@ -273,8 +273,8 @@ class ExperimentRunner:
             
             for param, bounds in continuous_params.items():
                 lower, upper = bounds
-                if param == 'k':
-                    # k值在对数空间均匀采样
+                if param == 'k' or param == 'fee':
+                    # k值和fee在对数空间均匀采样
                     log_lower = np.log10(lower)
                     log_upper = np.log10(upper)
                     log_val = random.uniform(log_lower, log_upper)
@@ -330,8 +330,8 @@ class ExperimentRunner:
             values = df[param]
             lower, upper = bounds
             
-            if param == 'k':
-                # 对k值检查对数分布
+            if param == 'k' or param == 'fee':
+                # 对k值和fee检查对数分布
                 log_values = np.log10(values)
                 log_lower = np.log10(lower)
                 log_upper = np.log10(upper)
@@ -349,10 +349,15 @@ class ExperimentRunner:
         print("\n采样分布统计:")
         for param in continuous_params.keys():
             values = df[param]
-            print(f"{param}: 均值={values.mean():.4f}, 标准差={values.std():.4f}, 范围=[{values.min():.4f}, {values.max():.4f}]")
+            if param == 'k' or param == 'fee':
+                # 对k值和fee显示对数统计
+                log_values = np.log10(values)
+                print(f"{param}: 对数均值={log_values.mean():.4f}, 对数标准差={log_values.std():.4f}, 范围=[{10**log_values.min():.2e}, {10**log_values.max():.2e}]")
+            else:
+                print(f"{param}: 均值={values.mean():.4f}, 标准差={values.std():.4f}, 范围=[{values.min():.4f}, {values.max():.4f}]")
         
         print("=== 验证完成 ===\n")
-    
+        
     def run_latin_hypercube_sampling(self, param_bounds, n_samples=64):
         """使用连续参数空间的拉丁超立方采样运行参数扫描（seed固定）"""
         self.results = []
@@ -453,7 +458,7 @@ python ttest.py"""
     # 定义连续参数空间的上下界（不包含seed）
     param_bounds = {
         'k': (1e9, 1e12),        # 资金池规模: 1e9 到 1e12
-        'fee': (0.0005, 0.1),     # 手续费: 0.05% 到 10%
+        'fee': (0.0001, 0.1),     # 手续费: 0.05% 到 10%
         'max_slippage': (0.01, 1.0),  # 最大滑点: 1% 到 100%
     }
     

@@ -40,6 +40,8 @@ def load_and_preprocess_data(file_path):
     # 复制数据用于处理
     X = df[FEATURE_COLS].copy()
     y = df[TARGET_COLS].copy()
+    y['spread_mean'] = abs(y['spread_mean'])
+    y['volume_mean'] = abs(y['volume_mean'])
     
     # 将seed转换为分类变量（字符串类型）
     X['seed'] = X['seed'].astype(str)
@@ -310,9 +312,9 @@ def plot_combined_feature_analysis(importance_dict, save_path='robust/combined_f
     """组合特征分析图 - 左右两个子图排版，确保特征顺序一致"""
     fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(20, 8))
     
-    # 左子图：特征重要性比较
-    colors = ['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728']
-    
+    # 选择学术蓝调配色
+    colors = ['#2E86AB', '#A23B72', '#F18F01']  # 深蓝、紫红、橙黄
+
     # 为每个目标创建水平条形图
     targets = list(importance_dict.keys())
     features = importance_dict[targets[0]]['Feature'].tolist()
@@ -333,7 +335,7 @@ def plot_combined_feature_analysis(importance_dict, save_path='robust/combined_f
     
     # 绘制左子图：特征重要性比较
     y_pos = np.arange(len(sorted_features))
-    bar_height = 0.2
+    bar_height = 0.22  # 稍微调整条形高度
     
     for i, target in enumerate(targets):
         importances = []
@@ -342,18 +344,30 @@ def plot_combined_feature_analysis(importance_dict, save_path='robust/combined_f
             importance_val = importance_df[importance_df['Feature'] == feature]['Gain Percentage(%)'].values[0]
             importances.append(importance_val)
         
-        ax1.barh(y_pos + i * bar_height, importances, bar_height, 
-                color=colors[i], alpha=0.8, label=target)
+        # 使用学术配色，添加边框增强质感
+        bars = ax1.barh(y_pos + i * bar_height, importances, bar_height, 
+                       color=colors[i], alpha=0.85, label=target, linewidth=0.8)
+        
+        # 添加数值标签（可选）
+        for j, (bar, importance) in enumerate(zip(bars, importances)):
+            if importance > 5:  # 只在重要性大于5%时显示标签
+                ax1.text(bar.get_width() + 0.5, bar.get_y() + bar.get_height()/2, 
+                        f'{importance:.1f}%', ha='left', va='center', fontsize=9)
     
     ax1.set_yticks(y_pos + bar_height)
-    ax1.set_yticklabels(sorted_features[::-1])
-    ax1.set_xlabel('Feature Importance (%)')
-    ax1.set_title('Feature Importance Comparison Across Targets')
-    ax1.legend()
-    ax1.grid(True, alpha=0.3, axis='x')
+    ax1.set_yticklabels(sorted_features[::-1], fontsize=11)
+    ax1.set_xlabel('Feature Importance (%)', fontsize=12, fontweight='bold')
+    ax1.set_title('Feature Importance Comparison Across Targets', 
+                 fontsize=14, fontweight='bold', pad=15)
+    ax1.legend(fontsize=11, framealpha=0.9)
+    ax1.grid(True, alpha=0.2, axis='x')
+    
+    # # 设置边框样式
+    # for spine in ax1.spines.values():
+    #     spine.set_linewidth(1.2)
+    #     spine.set_color('#333333')
     
     # 右子图：特征贡献热力图（使用相同的特征排序）
-    # 创建特征贡献矩阵，按sorted_features顺序排列
     contribution_matrix = np.zeros((len(sorted_features), len(targets)))
     for j, target in enumerate(targets):
         importance_df = importance_dict[target]
@@ -362,35 +376,35 @@ def plot_combined_feature_analysis(importance_dict, save_path='robust/combined_f
             if len(contribution) > 0:
                 contribution_matrix[i, j] = contribution[0]
     
-    # 创建DataFrame用于热力图，使用排序后的特征
+    # 创建DataFrame用于热力图
     heatmap_df = pd.DataFrame(
         contribution_matrix,
-        index=sorted_features,  # 使用排序后的特征顺序
+        index=sorted_features,
         columns=targets
     )
     
-    # 使用seaborn绘制热力图
+    # 使用更高级的热力图配色
     sns.heatmap(
         heatmap_df, 
         annot=True, 
         fmt='.2f', 
-        cmap='YlOrRd', 
+        cmap='Blues',  # 改为蓝色系，更符合学术风格
         cbar_kws={'label': 'Feature Gain Percentage (%)'},
         ax=ax2,
-        linewidths=0.5,
-        linecolor='white'
+        linewidths=0.8,
+        linecolor='white',
+        annot_kws={'size': 10, 'weight': 'bold'}
     )
     
-    ax2.set_xlabel('Target Variables')
-    ax2.set_ylabel('Features')
-    ax2.set_title('Feature Contribution Heatmap')
+    ax2.set_xlabel('Target Variables', fontsize=12, fontweight='bold')
+    ax2.set_ylabel('Features', fontsize=12, fontweight='bold')
+    ax2.set_title('Feature Contribution Heatmap', fontsize=14, fontweight='bold', pad=15)
     
     plt.tight_layout()
-    plt.savefig(save_path, dpi=300, bbox_inches='tight')
+    plt.savefig(save_path, dpi=300, bbox_inches='tight', facecolor='white')
     plt.show()
     
     return heatmap_df
-
 def plot_correlation_heatmap(X_modeling, y, save_path='robust/correlation_heatmap.png'):
     """特征与目标变量的相关性热力图"""
     # 合并特征和目标变量
