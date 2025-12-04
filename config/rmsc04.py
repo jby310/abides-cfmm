@@ -143,7 +143,15 @@ parser.add_argument('--max-slippage',
                     type=float,
                     default=0.1,
                     help='Threshold for resetting the CFMM Agent\'s parameters.')
-
+parser.add_argument('--num-hybrid-agents',
+                    type=int,
+                    default=100,
+                    help='number of HybridAgents')
+parser.add_argument('--r-bar',
+                    type=float,
+                    default=3611.0,
+                    help='Volatility of fundamental time series.'
+                    )
 args, remaining_args = parser.parse_known_args()
 
 if args.config_help:
@@ -178,7 +186,7 @@ agent_count, agents, agent_types = 0, [], []
 symbol = args.ticker
 starting_cash = 10000000  # Cash in this simulator is always in CENTS.
 
-r_bar = 1e5
+r_bar = args.r_bar
 sigma_n = r_bar / 10
 kappa = 1.67e-15
 lambda_a = 7e-11
@@ -358,7 +366,8 @@ agent_count += 1
 # 7) MarketOnlyAgents 5229-5428
 from agent.MarketOnlyAgent import MarketOnlyAgent
 
-num_market_only_agents = 25
+# num_market_only_agents = 25
+num_market_only_agents = args.num_hybrid_agents
 agents.extend([MarketOnlyAgent(id=j,
                              name="MARKET_ONLY_AGENT_{}".format(j),
                              type="MarketOnlyAgent",

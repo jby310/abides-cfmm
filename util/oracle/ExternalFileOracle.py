@@ -32,18 +32,33 @@ class ExternalFileOracle:
                     # 如果 pickle 读取失败，尝试读取 csv 文件
                     fundamental_df = pd.read_csv(fundamental_file_path)
                 except:
-                    # 如果 csv 读取也失败，尝试读取 excel 文件
-                    fundamental_df = pd.read_excel(fundamental_file_path, sheet_name='1110')
-                    # 读取Excel后，先过滤掉'Dates'列中值为"Dates"的行
-                    fundamental_df = fundamental_df[fundamental_df['Dates'] != 'Dates']
-                    # fundamental_df['Dates']除了第一行剩下的把前面的'去掉
-                    fundamental_df['Dates'] = fundamental_df['Dates'].str.replace("'", "")
-                    # 把中间连续六个0（.000000）去掉
-                    fundamental_df['Dates'] = fundamental_df['Dates'].str.replace(".000000", "")
-                    # 转为日期格式
-                    # fundamental_df['Dates'] = pd.to_datetime(fundamental_df['Dates'], format='%Y%m%d %H:%M:%S')
-                    fundamental_df['Dates'] = pd.to_datetime(fundamental_df['Dates'])
-                    new_series = pd.Series(fundamental_df['Price'].values, index=fundamental_df['Dates'])
+                    try:
+                        # 如果 csv 读取也失败，尝试读取 excel 文件 (ETH1)
+                        fundamental_df = pd.read_excel(fundamental_file_path, sheet_name='1110')
+                        # 读取Excel后，先过滤掉'Dates'列中值为"Dates"的行
+                        fundamental_df = fundamental_df[fundamental_df['Dates'] != 'Dates']
+                        # fundamental_df['Dates']除了第一行剩下的把前面的'去掉
+                        fundamental_df['Dates'] = fundamental_df['Dates'].str.replace("'", "")
+                        # 把中间连续六个0（.000000）去掉
+                        fundamental_df['Dates'] = fundamental_df['Dates'].str.replace(".000000", "")
+                        # 转为日期格式
+                        # fundamental_df['Dates'] = pd.to_datetime(fundamental_df['Dates'], format='%Y%m%d %H:%M:%S')
+                        fundamental_df['Dates'] = pd.to_datetime(fundamental_df['Dates'])
+                        new_series = pd.Series(fundamental_df['Price'].values, index=fundamental_df['Dates'])
+                    except:
+                        # 如果 csv 读取也失败，尝试读取 excel 文件 (BIT)
+                        fundamental_df = pd.read_excel(fundamental_file_path)
+                        # 读取Excel后，先过滤掉'Dates'列中值为"Dates"的行
+                        fundamental_df = fundamental_df[fundamental_df['Dates'] != 'Dates']
+                        # fundamental_df['Dates']除了第一行剩下的把前面的'去掉
+                        fundamental_df['Dates'] = fundamental_df['Dates'].str.replace("'", "")
+                        # 把中间连续六个0（.000000）去掉
+                        fundamental_df['Dates'] = fundamental_df['Dates'].str.replace(".000000", "")
+                        # 转为日期格式
+                        # fundamental_df['Dates'] = pd.to_datetime(fundamental_df['Dates'], format='%Y%m%d %H:%M:%S')
+                        fundamental_df['Dates'] = pd.to_datetime(fundamental_df['Dates'])
+                        new_series = pd.Series(fundamental_df['Price'].values, index=fundamental_df['Dates'])
+
 
             fundamentals.update({symbol: new_series})
 

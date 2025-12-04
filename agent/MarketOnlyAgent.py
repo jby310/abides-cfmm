@@ -437,4 +437,4 @@ class MarketOnlyAgent(TradingAgent):
     #     return pd.Timedelta(self.wake_up_freq)
 
     def getWakeFrequency(self):
-        return pd.Timedelta(self.random_state.randint(low=30, high=100), unit='s')
+        return pd.Timedelta(self.random_state.randint(low=30, high=200), unit='s')

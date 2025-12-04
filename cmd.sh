@@ -1,7 +1,11 @@
 # run abides
 # python -u abides.py -c rmsc03 -t ABM -d 20200603 -s 1234 -l rmsc03_two_hour
-python -u abides.py -c rmsc03 -t ETH -d 20251110 -s 1235 -l rmsc03_two_hour --start-time 09:30:00 --end-time 09:40:00 --fundamental-file-path data/ETH1.xlsx 
-python -u abides.py -c rmsc04 -t ETH -d 20251110 -s 1235 -l rmsc04_two_hour --start-time 09:30:00 --end-time 09:40:00 -k 10000000 --fee 0.01 --max-slippage 0.1 --fundamental-file-path data/ETH1.xlsx
+python -u abides.py -c rmsc03 -t ETH -d 20251110 -s 1235 -l rmsc03_two_hour --start-time 09:30:00 --end-time 16:00:00 --fundamental-file-path data/ETH1.xlsx 
+python -u abides.py -c rmsc04 -t ETH -d 20251110 -s 1235 -l rmsc04_two_hour --start-time 09:30:00 --end-time 16:00:00 -k 1000000000 --fee 0.003 --max-slippage 0.025 --fundamental-file-path data/ETH1.xlsx
+python ttest.py
+
+python -u abides.py -c rmsc03 -t BIT -d 20251028 -s 5678 -l rmsc03_two_hour --start-time 09:30:00 --end-time 09:40:00 --num-hybrid-agents 100 --fundamental-file-path data/BIT.xlsx --r-bar 3611.0
+python -u abides.py -c rmsc04 -t BIT -d 20251028 -s 5678 -l rmsc04_two_hour --start-time 09:30:00 --end-time 09:40:00 -k 1000000000 --fee 0.003 --max-slippage 0.01 --num-hybrid-agents 100 --fundamental-file-path data/BIT.xlsx --r-bar 3611.0
 python ttest.py
 
 # Plot using liquidity telemetry and explain what the plot does
