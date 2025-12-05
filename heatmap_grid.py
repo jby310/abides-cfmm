@@ -8,86 +8,125 @@ import tempfile
 import json
 import random
 
-# 设置中文显示和负号正常显示
+# 全局设置（保持不变）
 plt.rcParams['font.sans-serif'] = ['SimHei']
 plt.rcParams['axes.unicode_minus'] = False
-
-# 全局变量用于控制是否跳过初始通用对照组
-# 第一次运行时设置为 False，运行后可以设置为 True 跳过初始通用对照组（仅当agents_values长度为1时）
-IS_CONTROL_GROUP_RUN = False 
-# 存储已运行的对照组的参数，以便动态跳过
-_CONTROL_GROUP_RUN_PARAMS = {} 
-
 
 class ExperimentRunner:
     def __init__(self, base_cmd, param_ranges):
         self.base_cmd = base_cmd
         self.results = []
-        self.control_group_run = IS_CONTROL_GROUP_RUN 
-        self.results_file = 'experiment_results_grid_search_v2_crypto.csv' # 更改结果文件名以区分
+        # 对照组结果和状态管理
+        self.control_results_file = 'control_group_status_v3_crypto.json'
+        self.control_group_status = self.load_control_status()
+        
+        self.results_file = 'experiment_results_grid_search_v3_crypto.csv' 
         self.param_ranges = param_ranges
         self.existing_results = self.load_results_from_csv()
-        self.control_group_params_run = set() # 记录已运行的对照组参数: (num_hybrid_agents, fundamental_file_path, seed)
         
+    def load_control_status(self):
+        """从 JSON 文件加载已成功运行的对照组状态"""
+        if os.path.exists(self.control_results_file):
+            try:
+                with open(self.control_results_file, 'r') as f:
+                    # 使用 frozenset 来存储参数组合的哈希值
+                    # 注意：加载时需要处理 fundamental_file_path 的空格
+                    data = json.load(f)
+                    # 确保 fundamental_file_path 始终被 strip()
+                    status_set = set()
+                    for d in data:
+                        if 'fundamental_file_path' in d:
+                            d['fundamental_file_path'] = d['fundamental_file_path'].strip()
+                        status_set.add(frozenset(d.items()))
+                    return status_set
+            except Exception as e:
+                print(f"加载对照组状态失败: {e}")
+                return set()
+        return set()
+
+    def save_control_status(self, params):
+        """将成功运行的对照组参数组合保存到 JSON 文件"""
+        # 确保保存前进行 strip()
+        params_to_save = params.copy()
+        params_to_save['fundamental_file_path'] = params_to_save['fundamental_file_path'].strip()
+        
+        # 将 frozenset 转换回 list/dict 以便 JSON 存储
+        # 先将当前状态（已清理空格）转换为列表
+        current_list = [dict(s) for s in self.control_group_status]
+        
+        # 检查是否已存在（理论上 run_control_group 已经检查过）
+        params_frozen = frozenset(params_to_save.items())
+        if params_frozen not in self.control_group_status:
+            current_list.append(params_to_save)
+            self.control_group_status.add(params_frozen)
+
+        try:
+            with open(self.control_results_file, 'w') as f:
+                json.dump(current_list, f, indent=4)
+        except Exception as e:
+            print(f"保存对照组状态失败: {e}")
+            
+    def get_control_params(self, combination):
+        """从实验组组合中提取对照组所需的参数"""
+        return {
+            'num_hybrid_agents': combination['num_hybrid_agents'], 
+            'fundamental_file_path': combination['fundamental_file_path'].strip(), 
+            'seed': combination['seed']
+        }
+
     def replace_parameter(self, cmd, param_name, param_value):
         """通用参数替换函数"""
-        # param_value 必须是字符串或能转为字符串
-        param_value_str = str(param_value)
-        
         # 处理 -param_name value 形式
-        pattern1 = rf'({param_name})\s+\S+'
-        replacement1 = r'\1 ' + param_value_str
+        pattern1 = rf'{re.escape(param_name)}\s+\S+'
+        replacement1 = f'{param_name} {param_value}'
         cmd = re.sub(pattern1, replacement1, cmd)
         
         # 处理 param_name=value 形式
-        pattern2 = rf'({param_name}=)\S+'
-        replacement2 = r'\1' + param_value_str
+        pattern2 = rf'{re.escape(param_name)}=\S+'
+        replacement2 = f'{param_name}={param_value}'
         cmd = re.sub(pattern2, replacement2, cmd)
         
         return cmd
         
-    def _get_asset_config(self, fundamental_file_path):
-        """根据 fundamental_file_path 返回对应的 r_bar 和 -d 值"""
-        path = fundamental_file_path.strip()
-        if 'ETH1.xlsx' in path:
-            return {'r_bar': 3611.0, '-d': 'ETH'}
-        elif 'BIT.xlsx' in path:
-            return {'r_bar': 113994.6305, '-d': 'BIT'}
-        else:
-            # 默认值
-            return {'r_bar': 3611.0, '-d': '20251028'}
-
     def run_control_group(self, num_agents_value, fundamental_file_value, seed_value):
-        """
-        运行对照组，现在接受参数以匹配实验组。
-        对照组只需替换 num_hybrid_agents, fundamental_file_path, seed, r_bar, -d。
-        """
-        # 确定对照组的唯一标识 (num_hybrid_agents, fundamental_file_path, seed)
-        control_key = (int(num_agents_value), fundamental_file_value.strip(), int(seed_value))
+        """运行对照组（如果尚未运行）"""
         
-        # 检查是否已运行
-        if control_key in self.control_group_params_run:
-            print(f"对照组 (agents={num_agents_value}, fund={fundamental_file_value.strip()}, seed={seed_value}) 已运行，跳过...")
+        control_params = {
+            'num_hybrid_agents': int(num_agents_value),
+            'fundamental_file_path': fundamental_file_value.strip(),
+            'seed': int(seed_value)
+        }
+        control_params_frozen = frozenset(control_params.items())
+
+        if control_params_frozen in self.control_group_status:
+            # print(f"对照组已运行，跳过: {control_params}")
             return True
-        
-        # 获取资产配置
-        asset_config = self._get_asset_config(fundamental_file_value)
-        r_bar_value = asset_config['r_bar']
-        d_value = asset_config['-d']
-        
+            
         try:
-            print(f"运行对照组: agents={num_agents_value}, fund={fundamental_file_value.strip()}, seed={seed_value}, r_bar={r_bar_value}, -d={d_value}")
+            print(f"\n--- 运行新的对照组: {control_params} ---")
             
             lines = [line.strip() for line in self.base_cmd.split('\n') if line.strip()]
-            control_cmd = lines[0] # 第一个命令是对照组模板
-            
-            # 替换对照组所需的参数
+            if not lines:
+                print("错误: base_cmd为空")
+                return False
+                
+            control_cmd = lines[0]
+
+            # 替换核心参数
             control_cmd = self.replace_parameter(control_cmd, '--num-hybrid-agents', int(num_agents_value))
             control_cmd = self.replace_parameter(control_cmd, '--fundamental-file-path', fundamental_file_value)
             control_cmd = self.replace_parameter(control_cmd, '-s', seed_value)
-            control_cmd = self.replace_parameter(control_cmd, '--r-bar', r_bar_value)
-            control_cmd = self.replace_parameter(control_cmd, '-d', d_value)
 
+            # 设置 r_bar
+            r_bar = 0.0
+            fund_path_stripped = fundamental_file_value.strip()
+            if fund_path_stripped == 'data/ETH1.xlsx':
+                r_bar = 3611.0
+            elif fund_path_stripped == 'data/BIT.xlsx':
+                r_bar = 113994.6305
+                
+            control_cmd = self.replace_parameter(control_cmd, '--r-bar', r_bar)
+            
             
             temp_dir = tempfile.gettempdir()
             batch_filename = os.path.join(temp_dir, 'run_control.bat')
@@ -99,48 +138,39 @@ class ExperimentRunner:
             with open(batch_filename, 'w') as f:
                 f.write(batch_content)
             
+            # 使用 os.system 执行命令
             result_code = os.system(f'"{batch_filename}"')
             
             if result_code != 0:
                 print(f"对照组执行失败，返回码: {result_code}")
                 return False
                 
-            self.control_group_params_run.add(control_key)
+            # 成功运行后记录状态
+            self.save_control_status(control_params)
             print("对照组运行完成")
             return True
                 
         except Exception as e:
             print(f"对照组运行异常: {e}")
             return False
-            
+
     def append_result_to_csv(self, result):
         """将单次实验结果追加到CSV文件"""
         try:
-            # 确保 k, fee, max_slippage 有足够的精度进行比较
-            result_for_comparison = result.copy()
-            result_for_comparison['k'] = round(result_for_comparison['k'], 6)
-            result_for_comparison['fee'] = round(result_for_comparison['fee'], 6)
-            result_for_comparison['max_slippage'] = round(result_for_comparison['max_slippage'], 6)
-
             result_df = pd.DataFrame([result])
             
             if os.path.exists(self.results_file):
+                # 重新加载以确保最新的 existing_df
                 existing_df = self.load_results_from_csv()
                 
-                # 对现有结果进行四舍五入以匹配浮点数比较逻辑
-                existing_df_rounded = existing_df.copy()
-                existing_df_rounded['k'] = existing_df_rounded['k'].round(6)
-                existing_df_rounded['fee'] = existing_df_rounded['fee'].round(6)
-                existing_df_rounded['max_slippage'] = existing_df_rounded['max_slippage'].round(6)
-                
                 # 检查当前结果是否已存在（精确匹配所有参数）
-                is_duplicate = existing_df_rounded[
-                    (existing_df_rounded['k'] == result_for_comparison['k']) & 
-                    (existing_df_rounded['fee'] == result_for_comparison['fee']) & 
-                    (existing_df_rounded['max_slippage'] == result_for_comparison['max_slippage']) & 
-                    (existing_df_rounded['num_hybrid_agents'] == result_for_comparison['num_hybrid_agents']) & 
-                    (existing_df_rounded['fundamental_file_path'] == result_for_comparison['fundamental_file_path']) & 
-                    (existing_df_rounded['seed'] == result_for_comparison['seed'])
+                is_duplicate = existing_df[
+                    (existing_df['k'].round(6) == round(result['k'], 6)) & 
+                    (existing_df['fee'].round(6) == round(result['fee'], 6)) & 
+                    (existing_df['max_slippage'].round(6) == round(result['max_slippage'], 6)) & 
+                    (existing_df['num_hybrid_agents'] == result['num_hybrid_agents']) & 
+                    (existing_df['fundamental_file_path'] == result['fundamental_file_path'].strip()) & 
+                    (existing_df['seed'] == result['seed'])
                 ].shape[0] > 0
                 
                 if is_duplicate:
@@ -158,67 +188,59 @@ class ExperimentRunner:
             return False
 
     def determine_effect_type(self, spread_mean, depth_mean, volume_mean, spread_p, depth_p, volume_p):
-        """内部函数：根据 T 检验结果判断效应类型 (显著性水平 alpha = 0.05)"""
-        alpha = 0.05
+        """内部函数：根据 T 检验结果判断效应类型"""
+        # 定义判断标准 (假设显著性水平 alpha = 0.05)
         
         # 共生效应：价差不显著变化 或 略微变小，同时深度和成交量显著增加
-        # 略微变小：我们允许价差均值在统计学上不显著（p>alpha）或者变动非常小（绝对值小于0.002）
-        is_spread_stable = (spread_p > alpha) or (abs(spread_mean) <= 0.002)
-        is_depth_increase = (depth_p < alpha) and (depth_mean > 0)
-        is_volume_increase = (volume_p < alpha) and (volume_mean > 0)
+        is_spread_stable = (spread_p > 0.05) or (abs(spread_mean) <= 0.002)
+        is_depth_increase = (depth_p < 0.05) and (depth_mean > 0)
+        is_volume_increase = (volume_p < 0.05) and (volume_mean > 0)
         
         if is_spread_stable and is_depth_increase and is_volume_increase:
             return "共生效应"
         
-        # 挤出效应：价差显著变大（即显著变差），同时深度和成交量均没有显著增加
-        # 显著变大（显著变差）：p < alpha 且 mean > 0.005
-        is_spread_worse = (spread_p < alpha) and (spread_mean > 0.005)
-        is_depth_not_better = (depth_p > alpha) or (depth_mean <= 0)
-        is_volume_not_better = (volume_p > alpha) or (volume_mean <= 0)
+        # 挤出效应：价差显著变大，同时深度或成交量没有显著增加
+        is_spread_worse = (spread_p < 0.05) and (spread_mean > 0.005)
+        is_depth_not_better = (depth_p > 0.05) or (depth_mean <= 0)
+        is_volume_not_better = (volume_p > 0.05) or (volume_mean <= 0)
         
         if is_spread_worse and is_depth_not_better and is_volume_not_better:
             return "挤出效应"
-        
-        # 混合效应 (恶化价差/增加流动性)：价差显著变大，但深度或成交量也显著增加
-        if is_spread_worse and (is_depth_increase or is_volume_increase):
+        elif is_spread_worse and (is_depth_increase or is_volume_increase):
+             # 价差显著变大，但深度或成交量也显著增加
              return "混合效应 (恶化价差/增加流动性)"
-        
-        # 其他所有情况都归类为混合效应（可能包含不显著变化，或仅一两个指标显著变化等）
-        return "混合效应"
-
+        else:
+            return "混合效应"
 
     def run_single_experiment(self, k_value, fee_value, slippage_value, num_agents_value, fundamental_file_value, seed_value):
         """运行单次实验（实验组）并提取 T 检验结果和效应类型"""
-        # --- 1. 运行对照组 (必须在实验组之前运行) ---
-        if not self.run_control_group(num_agents_value, fundamental_file_value, seed_value):
-            return None # 如果对照组运行失败，则跳过本次实验
-
         try:
-            print(f"运行实验组: k={k_value:.2e}, fee={fee_value:.4f}, slippage={slippage_value:.3f}, agents={num_agents_value}, fund={fundamental_file_value.strip()}, seed={seed_value}")
+            print(f"-> 运行实验组: k={k_value:.2e}, fee={fee_value:.4f}, slippage={slippage_value:.3f}")
             
             result_dir = "ttest_results"
             os.makedirs(result_dir, exist_ok=True)
             
             lines = [line.strip() for line in self.base_cmd.split('\n') if line.strip()]
-            cmd2 = lines[1] # 第二个命令是实验组模板
+            cmd2 = lines[1]
             
-            # --- 2. 替换实验组参数 ---
-            
-            # 获取资产配置并替换 r_bar 和 -d
-            asset_config = self._get_asset_config(fundamental_file_value)
-            r_bar_value = asset_config['r_bar']
-            d_value = asset_config['-d']
-            
+            # 替换所有参数
             cmd2 = self.replace_parameter(cmd2, '-k', int(k_value))
             cmd2 = self.replace_parameter(cmd2, '--fee', fee_value)
             cmd2 = self.replace_parameter(cmd2, '--max-slippage', slippage_value)
             cmd2 = self.replace_parameter(cmd2, '--num-hybrid-agents', int(num_agents_value))
             cmd2 = self.replace_parameter(cmd2, '--fundamental-file-path', fundamental_file_value)
             cmd2 = self.replace_parameter(cmd2, '-s', seed_value)
-            # 替换 r_bar 和 -d
-            cmd2 = self.replace_parameter(cmd2, '--r-bar', r_bar_value)
-            cmd2 = self.replace_parameter(cmd2, '-d', d_value)
-            
+
+            # 设置 r_bar
+            r_bar = 0.0
+            fund_path_stripped = fundamental_file_value.strip()
+            if fund_path_stripped == 'data/ETH1.xlsx':
+                r_bar = 3611.0
+            elif fund_path_stripped == 'data/BIT.xlsx':
+                r_bar = 113994.6305
+                
+            cmd2 = self.replace_parameter(cmd2, '--r-bar', r_bar)
+                
             cmd3 = f"python ttest.py --output_dir {result_dir}"
             
             temp_dir = tempfile.gettempdir()
@@ -232,19 +254,18 @@ class ExperimentRunner:
             with open(batch_filename, 'w') as f:
                 f.write(batch_content)
             
-            # --- 3. 运行实验和T检验 ---
             result_code = os.system(f'"{batch_filename}"')
             
             if result_code != 0:
                 print(f"实验组执行失败，返回码: {result_code}")
                 return None
                 
-            # --- 4. 提取和处理结果 ---
             result_file = os.path.join(result_dir, 'ttest_results.json')
             if os.path.exists(result_file):
                 with open(result_file, 'r') as f:
                     ttest_result = json.load(f)
                 
+                # --- 效应计算开始 ---
                 spread_mean = ttest_result.get('spread_mean', np.nan)
                 depth_mean = ttest_result.get('depth_mean', np.nan)
                 volume_mean = ttest_result.get('volume_mean', np.nan)
@@ -257,6 +278,7 @@ class ExperimentRunner:
                     spread_mean, depth_mean, volume_mean, 
                     spread_p, depth_p, volume_p
                 )
+                # --- 效应计算结束 ---
                 
                 result = {
                     'k': float(k_value), 
@@ -265,11 +287,12 @@ class ExperimentRunner:
                     'num_hybrid_agents': int(num_agents_value), 
                     'fundamental_file_path': fundamental_file_value.strip(),
                     'seed': int(seed_value),
-                    'effect_type': effect_type, 
+                    'effect_type': effect_type, # 新增效应类型
                     **ttest_result
                 }
-                print(f"成功提取结果: ΔSpread={result['spread_mean']:.4f}, ΔDepth={result['depth_mean']:.2f}, ΔVolume={result['volume_mean']:.2f}, 效应: {effect_type}")
+                print(f"-> 结果: ΔSpread={result['spread_mean']:.4f}, ΔDepth={result['depth_mean']:.2f}, ΔVolume={result['volume_mean']:.2f}, 效应: {effect_type}")
                 
+                # 将结果保存到CSV
                 self.append_result_to_csv(result)
                 
                 return result
@@ -282,11 +305,17 @@ class ExperimentRunner:
             return None
 
     def grid_search_sampling(self, param_ranges):
-        """根据指定的范围和步长进行网格采样。"""
+        """
+        根据指定的范围和步长进行网格采样。
+        执行顺序调整为: 
+        Agents -> Fund_Path -> Seed -> K -> Fee -> Slippage
+        以减少对照组 (Agents, Fund_Path, Seed) 的重复运行。
+        """
         print("\n=== 开始生成网格采样参数组合 ===")
         
         # 1. k值 (对数步进: 10^9, 10^11, 10^13, 10^15)
-        k_values = [10**i for i in range(9, 16, 2)]
+        k_values = [10**i for i in range(9, 13, 1)]
+        # k_values = [10**11]
         
         # 2. fee值 (线性步进: 0.001, 0.004, 0.007, 0.010)
         fee_start = 0.001
@@ -294,6 +323,7 @@ class ExperimentRunner:
         fee_step = 0.003
         fee_values = [round(fee_start + i * fee_step, 4) for i in range(int(round((fee_stop - fee_start) / fee_step)) + 1)]
         fee_values = sorted(list(set([v for v in fee_values if v >= fee_start and v <= fee_stop])))
+        # fee_values = [0.003]
 
         # 3. max_slippage值 (线性步进: 0.01, 0.04, 0.07, 0.10)
         slippage_start = 0.01
@@ -301,41 +331,41 @@ class ExperimentRunner:
         slippage_step = 0.03
         slippage_values = [round(slippage_start + i * slippage_step, 4) for i in range(int(round((slippage_stop - slippage_start) / slippage_step)) + 1)]
         slippage_values = sorted(list(set([v for v in slippage_values if v >= slippage_start and v <= slippage_stop])))
+        # slippage_values = [0.05]
         
-        # 4. num_hybrid_agents (100, 125, 150, 175, 200) - 从 param_ranges 获取
-        agents_start = param_ranges.get('num_hybrid_agents', (100, 200))[0]
-        agents_stop = param_ranges.get('num_hybrid_agents', (100, 200))[1]
-        agents_step = 25 # 默认步长为25 (100, 125, 150, 175, 200)
-        # agents_values = list(range(agents_start, agents_stop + agents_step, agents_step))
-        agents_values = [100]
-        
+        # 4. num_hybrid_agents 
+        agents_values = param_ranges.get('num_hybrid_agents', []) 
+        if not agents_values: agents_values = [100]
+
         # 5. fundamental_file_path (列表)
         fundamental_values = param_ranges.get('fundamental_file_path', [])
         
         # 6. seed值 (列表)
-        seed_values = [int(s) for s in param_ranges.get('seed', [])]
+        seed_values = param_ranges.get('seed', [])
         
+        print(f"Agents值: {agents_values}")
+        print(f"Fund_Path值: {[f.strip() for f in fundamental_values]}")
+        print(f"Seed值: {seed_values}")
         print(f"k值: {[f'{v:.0e}' for v in k_values]}")
         print(f"fee值: {[f'{v:.4f}' for v in fee_values]}")
         print(f"max_slippage值: {[f'{v:.2f}' for v in slippage_values]}")
-        print(f"num_hybrid_agents值: {agents_values}")
-        print(f"fundamental_file_path值: {fundamental_values}")
-        print(f"seed值: {seed_values}")
-
-        # 生成所有组合（六重循环）
+        
+        # 生成所有组合（调整后的六重循环）
         combinations = []
-        for k in k_values:
-            for fee in fee_values:
-                for slippage in slippage_values:
-                    for agents in agents_values:
-                        for fund in fundamental_values:
-                            for seed in seed_values:
+        # 外层循环：对照组参数
+        for agents in agents_values:
+            for fund in fundamental_values:
+                for seed in seed_values:
+                    # 内层循环：实验组参数
+                    for k in k_values:
+                        for fee in fee_values:
+                            for slippage in slippage_values:
                                 combinations.append({
                                     'k': k,
                                     'fee': fee,
                                     'max_slippage': slippage,
                                     'num_hybrid_agents': agents,
-                                    'fundamental_file_path': fund.strip(),
+                                    'fundamental_file_path': fund, # 保持空格以便替换原始cmd
                                     'seed': seed
                                 })
                         
@@ -360,10 +390,11 @@ class ExperimentRunner:
         # 将现有结果转换为集合以便快速查找
         existing_tuples = set()
         for _, row in existing_df.iterrows():
-            # 1. 对数值列进行四舍五入
+            # 1. 对数值列进行四舍五入 (统一到小数点后 6 位)
             numerical_part = tuple(round(row[col], 6) for col in numerical_cols)
-            # 2. 获取其他列的值
+            # 2. 获取其他列的值 (fundamental_file_path 已经过 strip() 存储)
             other_part = tuple(row[col] for col in other_cols)
+            
             # 3. 组合成完整的元组
             existing_tuples.add(numerical_part + other_part)
 
@@ -375,7 +406,7 @@ class ExperimentRunner:
                 round(combo['fee'], 6), 
                 round(combo['max_slippage'], 6), 
                 combo['num_hybrid_agents'],
-                combo['fundamental_file_path'], 
+                combo['fundamental_file_path'].strip(), # 注意这里需要 strip() 来匹配已存储的结果
                 combo['seed']
             )
             
@@ -388,29 +419,10 @@ class ExperimentRunner:
         return filtered_combinations
     
     def run_grid_search(self, param_ranges):
-        """使用网格采样运行参数扫描"""
+        """使用网格采样运行参数扫描，并在需要时运行对照组"""
         self.results = []
         
         all_combinations = self.grid_search_sampling(param_ranges)
-        
-        # 确定 agents_values 的长度
-        agents_values = [c['num_hybrid_agents'] for c in all_combinations]
-        agents_values_count = len(set(agents_values))
-        
-        # 如果 num_hybrid_agents 只有一个值，则只在开始运行一次通用对照组（如果未运行过）
-        if agents_values_count == 1 and not IS_CONTROL_GROUP_RUN:
-            # 此时只需运行一个代表性的对照组（使用第一个组合的 agents, fund, seed）
-            representative_combo = all_combinations[0]
-            if not self.run_control_group(
-                representative_combo['num_hybrid_agents'], 
-                representative_combo['fundamental_file_path'], 
-                representative_combo['seed']
-            ):
-                print("通用对照组运行失败，终止实验")
-                return pd.DataFrame()
-            # 标记为已运行，避免 run_single_experiment 再次运行
-            global IS_CONTROL_GROUP_RUN
-            IS_CONTROL_GROUP_RUN = True
         
         # 过滤已运行的组合
         param_combinations_to_run = self.filter_existing_combinations(
@@ -425,20 +437,47 @@ class ExperimentRunner:
         print(f"历史结果总数: {len(self.existing_results)}")
         
         successful_experiments = 0
+        
+        # 使用当前对照组参数的元组来跟踪当前的对照组状态
+        current_control_params = None 
+        
         for i, params in enumerate(param_combinations_to_run):
-            print(f"\n=== 新实验 {i+1}/{len(param_combinations_to_run)} (总进度: {len(self.existing_results) + i + 1}/{len(all_combinations)}) ===")
             
-            # 如果 agents_values_count > 1，则 run_single_experiment 会在内部为每个组合运行对照组
-            # 如果 agents_values_count == 1，则对照组已在前面运行，run_single_experiment 内部会跳过
+            # 提取对照组所需参数
+            control_params = self.get_control_params(params)
+            
+            # 检查是否需要运行新的对照组
+            if current_control_params is None or current_control_params != control_params:
+                # 需要运行新的对照组
+                control_run_success = self.run_control_group(
+                    params['num_hybrid_agents'], 
+                    params['fundamental_file_path'], 
+                    params['seed']
+                )
+                
+                if not control_run_success:
+                    print(f"致命错误: 对照组运行失败，终止当前对照组下的所有实验组。对照组参数: {control_params}")
+                    # 由于循环顺序已优化，这里可以跳过当前对照组下的所有剩余组合（如果它们是连续的）
+                    # 但为了安全，我们只跳过当前的实验组。
+                    current_control_params = control_params # 更新状态，但不标记为成功运行
+                    continue
+                
+                # 更新当前成功运行的对照组参数
+                current_control_params = control_params 
+                print(f"\n=== 运行新对照组下的第 {i+1} 个实验 ===")
+            else:
+                # 沿用上一个对照组的结果，不打印对照组运行信息，节省屏幕输出
+                print(f"\n=== 沿用对照组 (Agents={control_params['num_hybrid_agents']}, Fund={control_params['fundamental_file_path']}, Seed={control_params['seed']}) 的第 {i+1} 个实验 ===")
+
+            # 运行实验组
             result = self.run_single_experiment(
                 params['k'], 
                 params['fee'], 
                 params['max_slippage'], 
                 params['num_hybrid_agents'], 
-                params['fundamental_file_path'],
+                params['fundamental_file_path'], 
                 params['seed']
             )
-            
             if result:
                 self.results.append(result)
                 successful_experiments += 1
@@ -457,19 +496,20 @@ class ExperimentRunner:
         """从CSV文件加载已有结果"""
         if os.path.exists(self.results_file):
             try:
-                # 尝试以 UTF-8 编码读取，如果失败则尝试 GBK
-                try:
-                    df = pd.read_csv(self.results_file, encoding='utf-8')
-                except UnicodeDecodeError:
-                    df = pd.read_csv(self.results_file, encoding='gbk')
-
+                # 显式指定 dtype 避免警告和类型不匹配
+                dtype_spec = {
+                    'k': float, 
+                    'fee': float, 
+                    'max_slippage': float,
+                    'num_hybrid_agents': int,
+                    'seed': int,
+                    'fundamental_file_path': str
+                }
+                df = pd.read_csv(self.results_file, dtype=dtype_spec)
+                
                 if not df.empty:
-                    # 确保参数列的类型正确
-                    if 'k' in df.columns: df['k'] = df['k'].astype(float)
-                    if 'fee' in df.columns: df['fee'] = df['fee'].astype(float)
-                    if 'max_slippage' in df.columns: df['max_slippage'] = df['max_slippage'].astype(float)
-                    if 'num_hybrid_agents' in df.columns: df['num_hybrid_agents'] = df['num_hybrid_agents'].astype(int) 
-                    if 'seed' in df.columns: df['seed'] = df['seed'].astype(int)
+                    # 确保 fundamental_file_path 已清理空格，以便与新的组合参数匹配
+                    df['fundamental_file_path'] = df['fundamental_file_path'].astype(str).str.strip()
                     
                 print(f"从 {self.results_file} 加载了 {len(df)} 条已有结果")
                 return df
@@ -480,28 +520,26 @@ class ExperimentRunner:
 
 def main():
     # 命令行参数模板。
-    # 注意：-d, --num-hybrid-agents, -s, --fundamental-file-path, --r-bar 
-    # 现在在运行前会被动态替换。
-    base_cmd = """python -u abides.py -c rmsc03 -t BIT -d 20251028 -s 5678 -l rmsc03_two_hour --start-time 09:30:00 --end-time 09:40:00 --num-hybrid-agents 100 --fundamental-file-path data/BIT.xlsx --r-bar 113994.6305
-python -u abides.py -c rmsc04 -t BIT -d 20251028 -s 5678 -l rmsc04_two_hour --start-time 09:30:00 --end-time 09:40:00 -k 1000000000 --fee 0.003 --max-slippage 0.01 --num-hybrid-agents 100 --fundamental-file-path data/BIT.xlsx --r-bar 113994.6305
+    # -c rmsc03 是对照组 (Control Group)
+    # -c rmsc04 是实验组 (Experiment Group)
+    base_cmd = """python -u abides.py -c rmsc03 -t ETH -d 20251028 -s 5678 -l rmsc03_two_hour --start-time 09:30:00 --end-time 09:35:00 --num-hybrid-agents 100 --fundamental-file-path data/BIT.xlsx --r-bar 113994.6305
+python -u abides.py -c rmsc04 -t ETH -d 20251028 -s 5678 -l rmsc04_two_hour --start-time 09:30:00 --end-time 09:35:00 -k 1000000000 --fee 0.003 --max-slippage 0.01 --num-hybrid-agents 100 --fundamental-file-path data/BIT.xlsx --r-bar 113994.6305
 python ttest.py"""
     
     # 定义网格采样的范围
     param_ranges = {
-        'k': (1e9, 1e15), 
+        'k': (1e9, 1e13), 
         'fee': (0.001, 0.010), 
         'max_slippage': (0.01, 0.10), 
-        # num_hybrid_agents: (起始值, 终止值)，步长在 grid_search_sampling 中定义为 25
-        'num_hybrid_agents' : (100, 200), 
-        # seed: 列表，值在 grid_search_sampling 中转换为 int
-        'seed': ['5678', '91011', '12314'], 
-        # fundamental_file_path: 列表，末尾的空格已被 .strip() 处理
-        'fundamental_file_path': ['data/ETH1.xlsx ', 'data/BIT.xlsx '],
+        'num_hybrid_agents' : [100, 150, 200], # 增加 agents 以测试循环顺序优化
+        'seed': [5678], 
+        'fundamental_file_path': ['data/ETH1.xlsx '], # 保持尾随空格
     }
+
     
     runner = ExperimentRunner(base_cmd, param_ranges)
     
-    print("开始基于网格采样的参数扫描实验...")
+    print("开始基于网格采样的参数扫描实验（优化对照组运行顺序）...")
     print(f"参数范围: {param_ranges}")
     
     # 运行网格采样
@@ -515,17 +553,10 @@ python ttest.py"""
     print("\n=== 实验最终结果概览 ===")
     if 'effect_type' in results_df.columns:
         print(results_df['effect_type'].value_counts())
-        print("\n=== 各效应类型的参数组合统计 ===")
-        print(results_df.groupby('effect_type').agg({
-            'k': ['min', 'max', 'mean'],
-            'fee': ['min', 'max', 'mean'],
-            'max_slippage': ['min', 'max', 'mean'],
-            'num_hybrid_agents': ['min', 'max', 'mean'],
-        }))
     else:
         print("CSV中缺少 'effect_type' 列。")
 
-    print("\n实验完成。所有结果（包含效应类型）已保存到 CSV 文件。")
+    print("\n实验完成。所有结果（包含效应类型）已保存到 CSV 文件，对照组状态已保存到 JSON 文件。")
 
 if __name__ == "__main__":
     main()

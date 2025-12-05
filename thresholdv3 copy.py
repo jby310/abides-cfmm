@@ -70,7 +70,7 @@ def calculate_coexistence_score(models, grid_df):
   for target, model in models.items():
     predictions[target] = model.predict(dmatrix)
   coexistence_scores = (predictions['depth_mean'] + predictions['volume_mean']) / \
-        (1 + np.abs(predictions['spread_mean']))
+        (10e-8 + np.exp(-predictions['spread_mean']))
   return coexistence_scores, predictions
 
 def calculate_adaptive_thresholds(scores, lower_percentile=45, upper_percentile=55):

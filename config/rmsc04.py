@@ -398,6 +398,7 @@ agents.extend([CFMMAgent(id=agent_count,
                              log_orders=log_orders,
                              initial_k=args.initial_k,
                              fee=args.fee,
+                             exchange_rate=args.r_bar,
                              random_state=np.random.RandomState(seed=np.random.randint(low=0, high=2 ** 32, dtype='uint64')))])
 agent_count += num_cfmm_agents
 agent_types.extend("CFMMAgent")

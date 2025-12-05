@@ -84,10 +84,16 @@ class SnapshotAgent(TradingAgent):
                             bid_p_cfmm, bid_v = bids_cfmm[0]
                             ask_p_cfmm, ask_v = asks_cfmm[0]
 
-                        self.logEvent('SPREAD', {
-                            'timestamp': currentTime,
-                            'spread': min(best_ask, ask_p_cfmm) - max(best_bid, bid_p_cfmm),
-                        })
+                        if min(best_ask, ask_p_cfmm) - max(best_bid, bid_p_cfmm) < 0:
+                            self.logEvent('SPREAD', {
+                                'timestamp': currentTime,
+                                'spread': best_ask - best_bid,
+                            })
+                        else:
+                            self.logEvent('SPREAD', {
+                                'timestamp': currentTime,
+                                'spread': min(best_ask, ask_p_cfmm) - max(best_bid, bid_p_cfmm),
+                            })
                     else:
 
                         self.logEvent('SPREAD', {

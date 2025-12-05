@@ -17,7 +17,7 @@ class CFMMAgent(ExchangeAgent):
     
     def __init__(self, id, name, type, mkt_open, mkt_close, symbol, 
                  initial_k=10000000, fee=0.003, 
-                 reset_threshold=0.1, pipeline_delay=40000,
+                 reset_threshold=0.1, pipeline_delay=40000, exchange_rate=3500,
                  computation_delay=1, log_orders=False, random_state=None):
         
         super().__init__(id, name, type, mkt_open, mkt_close, [symbol], 
@@ -30,7 +30,7 @@ class CFMMAgent(ExchangeAgent):
         self.reset_threshold = reset_threshold  # Price deviation threshold for reset
         
         # Track initial values for reset as per Document 3
-        self.exchange_rate = 3500
+        self.exchange_rate = exchange_rate
         self.initial_x = np.sqrt(initial_k / self.exchange_rate)
         self.initial_y = self.initial_x * self.exchange_rate
         self.initial_k = initial_k

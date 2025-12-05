@@ -52,6 +52,7 @@ class MarketOnlyAgent(TradingAgent):
         # 判断CFMM资产池是否需要重置
         self.reset_buy = False
         self.reset_sell = False
+        self.reset_all = False
 
         self.hybrid = hybrid
 
@@ -127,17 +128,31 @@ class MarketOnlyAgent(TradingAgent):
         # Execute trade following the detailed flow chart logic
         # 在每个时刻交易之前，判断是否需要重置CFMM池子。
         # need_reset = CFMMAgent.check_cfmm_reset_needed(self.symbol)
-        need_reset = self.reset_buy and self.reset_sell
-        if need_reset:
+
+        # 计算max(bid)是否大于min(ask)
+        if self.hybrid:
             bid, bid_vol, ask, ask_vol = self.getKnownBidAsk(self.symbol, best=True)
             if bid and ask:
-                reset_price = (bid + ask) / 2
-            else:
-                reset_price = bid if bid else ask
-            CFMMAgent.reset_cfmm_pool(self.symbol, reset_price)
-            log_print(f"MarketOnlyAgent {self.id}: CFMM pool reset for {self.symbol}")
-            self.reset_buy = False
-            self.reset_sell = False
+                cfmm_market_data = CFMMAgent.get_cfmm_market_data(self.symbol)
+                bids_cfmm, asks_cfmm = cfmm_market_data['bids'], cfmm_market_data['asks']
+                bid_p_cfmm, bid_v = bids_cfmm[0]
+                ask_p_cfmm, ask_v = asks_cfmm[0]
+                if max(bid, bid_p_cfmm) > min(ask, ask_p_cfmm):
+                    self.reset_all = True
+                else:
+                    self.reset_all = False
+            
+            need_reset = self.reset_buy and self.reset_sell or self.reset_all
+            if need_reset:
+                bid, bid_vol, ask, ask_vol = self.getKnownBidAsk(self.symbol, best=True)
+                if bid and ask:
+                    reset_price = (bid + ask) / 2
+                else:
+                    reset_price = bid if bid else ask
+                CFMMAgent.reset_cfmm_pool(self.symbol, reset_price)
+                log_print(f"MarketOnlyAgent {self.id}: CFMM pool reset for {self.symbol}")
+                self.reset_buy = False
+                self.reset_sell = False
 
         self.executeTradeFlowChart(currentTime, is_buy_order, max_trade_amount)
 
@@ -437,4 +452,4 @@ class MarketOnlyAgent(TradingAgent):
     #     return pd.Timedelta(self.wake_up_freq)
 
     def getWakeFrequency(self):
-        return pd.Timedelta(self.random_state.randint(low=30, high=200), unit='s')
+        return pd.Timedelta(self.random_state.randint(low=1, high=200), unit='s')
