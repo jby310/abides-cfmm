@@ -1,6 +1,7 @@
 import pandas as pd
 import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
+import numpy as np
 
 
 def load_and_preprocess_data(file_path):
@@ -16,7 +17,8 @@ def load_and_preprocess_data(file_path):
     # 筛选1小时数据（从第二条记录开始）
     if len(df) >= 2:  # 确保有足够数据
         start_time = df.index[1]
-        end_time = start_time + pd.Timedelta(hours=1)
+        start_time =  start_time + pd.Timedelta(minutes=2)
+        end_time = start_time + pd.Timedelta(hours=7)
         return df[(df.index >= start_time) & (df.index <= end_time)]
     return pd.DataFrame()  # 空数据处理
 
@@ -75,12 +77,61 @@ def process_volume_events(df):
     return volume_data_min
 
 
+def process_mid_price_from_depth(df):
+    """从BID_DEPTH和ASK_DEPTH事件计算中间价"""
+    if df.empty:
+        return pd.DataFrame(columns=['mid_price'])
+    
+    # 提取买卖深度事件
+    bid_events = df[df['EventType'] == 'BID_DEPTH']
+    ask_events = df[df['EventType'] == 'ASK_DEPTH']
+    
+    if bid_events.empty or ask_events.empty:
+        return pd.DataFrame(columns=['mid_price'])
+    
+    # 提取第一档买卖价格
+    bid_prices = []
+    bid_times = []
+    for idx, event in bid_events.iterrows():
+        if event['Event'] and len(event['Event']) > 0 and len(event['Event'][0]) > 0:
+            bid_prices.append(event['Event'][0][0])  # BID_DEPTH[0][0]
+            bid_times.append(idx)
+    
+    ask_prices = []
+    ask_times = []
+    for idx, event in ask_events.iterrows():
+        if event['Event'] and len(event['Event']) > 0 and len(event['Event'][0]) > 0:
+            ask_prices.append(event['Event'][0][0])  # ASK_DEPTH[0][0]
+            ask_times.append(idx)
+    
+    # 创建买卖价格的时间序列
+    bid_series = pd.Series(bid_prices, index=bid_times)
+    ask_series = pd.Series(ask_prices, index=ask_times)
+    
+    # 合并买卖价格到同一时间索引
+    prices_df = pd.DataFrame({
+        'bid_price': bid_series,
+        'ask_price': ask_series
+    })
+    
+    # 使用前向填充处理缺失值，确保每个时间点都有买卖价格
+    prices_df = prices_df.ffill()
+    
+    # 计算中间价：MID_PRICE = (BID_PRICE + ASK_PRICE) / 2
+    prices_df['mid_price'] = (prices_df['bid_price'] + prices_df['ask_price']) / 2
+    
+    # 按分钟重采样取平均值
+    mid_price_minute = prices_df[['mid_price']].resample('1s').mean().dropna()
+    
+    return mid_price_minute
+
+
 def plot_mid_price_comparison(merged, ax, styles):
     """绘制中间价预测与原始值对比图"""
     # 预测值曲线
-    ax.plot(merged.index, merged['mid_price_1_pred'], label='Hybrid', color=styles[name]['color'], linewidth=1.5)
+    ax.plot(merged.index, merged['mid_price_pred'], label='Hybrid', color=styles['rmsc04']['color'], linewidth=1.5)
     # 原始值曲线
-    ax.plot(merged.index, merged['mid_price_1_origin'], label='Original', color='blue', linewidth=1.5, alpha=styles[name]['alpha'])
+    ax.plot(merged.index, merged['mid_price_origin'], label='Original', color=styles['rmsc03']['color'], linewidth=1.5, alpha=styles['rmsc03']['alpha'])
 
     # 图表美化
     ax.set_xlabel('Timestamp', fontsize=10)
@@ -109,21 +160,8 @@ def plot_comparison_metrics(data_dict, merged):
     for name, data in data_dict.items():
         liq = data['liquidity']
         if not liq.empty:
-            # # 显示bid流动性（实线）
-            # ax1.plot(liq.index, liq['bid_liquidity'], 
-            #              label=f'{name} Bid Liquidity', **styles[name])
-            # # 显示ask流动性（虚线）
-            # ax1.plot(liq.index, liq['ask_liquidity'], 
-            #              label=f'{name} Ask Liquidity', linestyle='--',** styles[name])
-            # 显示最小流动性（点线）
             ax1.plot(liq.index, liq['min_liquidity'], 
                          label=f'{name} Min Liquidity', linestyle=':', **styles[name])
-
-
-        # liq = data['liquidity']
-        # if not liq.empty:
-        #     ax1.plot(liq.index, liq['min_liquidity'], 
-        #              label=f'{name} Min Liquidity', linestyle=':', **styles[name])
     
     ax1.set_ylabel('Liquidity (Shares)', fontsize=10)
     ax1.legend(fontsize=8, loc='upper left')
@@ -194,6 +232,8 @@ if __name__ == "__main__":
     
     # 批量处理市场指标数据
     data_dict = {}
+    mid_price_data = {}
+    
     for name, path in data_paths.items():
         raw_data = load_and_preprocess_data(path)
         data_dict[name] = {
@@ -201,21 +241,20 @@ if __name__ == "__main__":
             'spread': process_spread_events(raw_data),
             'volume': process_volume_events(raw_data)
         }
+        # 处理中间价数据
+        mid_price_data[name] = process_mid_price_from_depth(raw_data)
+
+
     
-    # 处理中间价数据
-    origin = pd.read_csv(r'log\rmsc03_two_hour\mid_price.csv')
-    pred = pd.read_csv(r'log\rmsc04_two_hour\mid_price.csv')
+    # 合并中间价数据
+    merged = pd.DataFrame()
+    if 'rmsc03' in mid_price_data and not mid_price_data['rmsc03'].empty:
+        merged['mid_price_origin'] = mid_price_data['rmsc03']['mid_price']
+    if 'rmsc04' in mid_price_data and not mid_price_data['rmsc04'].empty:
+        merged['mid_price_pred'] = mid_price_data['rmsc04']['mid_price']
     
-    # 转换时间格式并设置为索引
-    pred['timestamp'] = pd.to_datetime(pred['timestamp'])
-    pred.set_index('timestamp', inplace=True)
-    
-    origin['timestamp'] = pd.to_datetime(origin['timestamp'])
-    origin.set_index('timestamp', inplace=True)
-    
-    # 外连接合并并排序
-    merged = pred.join(origin, lsuffix='_pred', rsuffix='_origin', how='outer')
-    merged.sort_index(inplace=True)
+    # 使用外连接合并并排序
+    merged = merged.sort_index()
     
     # 绘制所有对比图表
     plot_comparison_metrics(data_dict, merged)

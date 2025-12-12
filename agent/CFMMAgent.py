@@ -139,26 +139,22 @@ class CFMMAgent(ExchangeAgent):
         return cfmm_instance.execute_trade(agent_id, quantity, is_buy_order, current_time)
     
     @classmethod
-    def get_transacted_volume_static(cls, symbol, lookback_period='10min'):
+    def get_transacted_volume_static(cls, symbol, lookback_period='10min', currentTime=None):
         """ Used by any trading agent subclass to query the total transacted volume in a given lookback period """
         cfmm_instance = cls.get_cfmm_instance(symbol)
         if cfmm_instance is None:
             return False
 
-        return cfmm_instance.get_transacted_volume(lookback_period)
+        return cfmm_instance.get_transacted_volume(lookback_period, currentTime)
 
 
-    def get_transacted_volume(self, lookback_period='1s'):
+    def get_transacted_volume(self, lookback_period='1s', currentTime=None):
         volume = 0
     
-        # 将lookback_period转换为pandas Timedelta
-        lookback_td = pd.Timedelta(lookback_period)
-        current_time = pd.Timestamp.now()
-        
         # 遍历交易历史，统计指定时间段内的交易量
-        if self.trade_history is None:
+        if len(self.trade_history) > 0:
             for trade in self.trade_history:
-                if current_time - trade['timestamp'] <= lookback_td:
+                if pd.Timedelta(0) <= currentTime - trade['trade_time'] <= pd.Timedelta(lookback_period):
                     if self.symbol is None or trade['symbol'] == self.symbol:
                         volume += trade['amount']
             
@@ -293,6 +289,7 @@ class CFMMAgent(ExchangeAgent):
             
             new_x = self.x - delta_x
             new_y = self.k / new_x
+            delta_y = new_y - self.y
             
             # Update state
             self.x = new_x

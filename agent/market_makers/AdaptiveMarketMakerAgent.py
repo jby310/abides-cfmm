@@ -11,7 +11,7 @@ ANCHOR_BOTTOM_STR = 'bottom'
 ANCHOR_MIDDLE_STR = 'middle'
 
 ADAPTIVE_SPREAD_STR = 'adaptive'
-INITIAL_SPREAD_VALUE = 50
+INITIAL_SPREAD_VALUE = 20000
 
 
 class AdaptiveMarketMakerAgent(TradingAgent):
@@ -28,7 +28,7 @@ class AdaptiveMarketMakerAgent(TradingAgent):
 
     def __init__(self, id, name, type, symbol, starting_cash, pov=0.05, min_order_size=20, window_size=5, anchor=ANCHOR_MIDDLE_STR,
                  num_ticks=20, level_spacing=0.5, wake_up_freq='1s', subscribe=False, subscribe_freq=10e9, subscribe_num_levels=1, cancel_limit_delay=50,
-                 skew_beta=0, spread_alpha=0.85, backstop_quantity=None, log_orders=False, random_state=None):
+                 skew_beta=0, spread_alpha=0.85, backstop_quantity=None, log_orders=False, random_state=None, last_mid=None):
 
         super().__init__(id, name, type, starting_cash=starting_cash, log_orders=log_orders, random_state=random_state)
         self.is_adaptive = False
@@ -59,7 +59,7 @@ class AdaptiveMarketMakerAgent(TradingAgent):
         self.buy_order_size = self.min_order_size
         self.sell_order_size = self.min_order_size
 
-        self.last_mid = None  # last observed mid price
+        self.last_mid = last_mid  # last observed mid price
         self.last_spread = INITIAL_SPREAD_VALUE  # last observed spread moving average
         self.tick_size = None if self.is_adaptive else ceil(self.last_spread * self.level_spacing)
         self.LIQUIDITY_DROPOUT_WARNING = f"Liquidity dropout for agent {self.name}."
@@ -234,6 +234,19 @@ class AdaptiveMarketMakerAgent(TradingAgent):
         :return:
         """
 
+        # # DOGE下
+        # if self.anchor == ANCHOR_MIDDLE_STR:
+        #     highest_bid = mid - 0.0005 * self.window_size
+        #     lowest_ask = mid + 0.0005 * self.window_size
+        # elif self.anchor == ANCHOR_BOTTOM_STR:
+        #     highest_bid = mid - 1
+        #     lowest_ask = mid + self.window_size
+        # elif self.anchor == ANCHOR_TOP_STR:
+        #     highest_bid = mid - self.window_size
+        #     lowest_ask = mid + 1
+        # self.tick_size = 0.001
+        # # DOGE结束
+
         if self.anchor == ANCHOR_MIDDLE_STR:
             highest_bid = int(mid) - floor(0.5 * self.window_size)
             lowest_ask = int(mid) + ceil(0.5 * self.window_size)
@@ -247,6 +260,9 @@ class AdaptiveMarketMakerAgent(TradingAgent):
         lowest_bid = highest_bid - ((self.num_ticks - 1) * self.tick_size)
         highest_ask = lowest_ask + ((self.num_ticks - 1) * self.tick_size)
 
+        # import numpy as np
+        # bids_to_place = np.arange(lowest_bid, highest_bid + self.tick_size, self.tick_size).tolist()
+        # asks_to_place = np.arange(lowest_ask, highest_ask + self.tick_size, self.tick_size).tolist()
         bids_to_place = [price for price in range(lowest_bid, highest_bid + self.tick_size, self.tick_size)]
         asks_to_place = [price for price in range(lowest_ask, highest_ask + self.tick_size, self.tick_size)]
 

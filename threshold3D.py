@@ -4,20 +4,25 @@ import numpy as np
 import matplotlib.pyplot as plt
 import seaborn as sns
 import xgboost as xgb
-from matplotlib.colors import ListedColormap 
-import matplotlib.patches as mpatches 
+from matplotlib.colors import ListedColormap
+import matplotlib.patches as mpatches
 
 # Define parameter ranges and grid density
 PARAM_BOUNDS = {
-    'k': (1e9, 1e12),        # Pool Size (k) range
-    'fee': (0.0001, 0.1),    # Fee (fee) range
-    'max_slippage': 0.05     # Fixed slippage value (mid-point)
+    'k': (1e12, 1e13),      # Pool Size (k) range
+    'fee': (0.001, 0.01),  # Fee (fee) range
+    'max_slippage': 0.05   # Fixed slippage value (mid-point)
 }
 
 # Grid Density (higher value means finer grid)
 GRID_DENSITY = 50
 # Coexistence Score Thresholds (T1 and T2, will be adaptively determined later)
-THRESHOLDS = None 
+THRESHOLDS = None
+
+# --- New Slice Parameters ---
+K_SLICE = 1e12      # Fixed k for the k-slice plot
+FEE_SLICE = 0.002  # Fixed fee for the fee-slice plot
+# ---------------------------
 
 def load_models(model_dir='robust'):
     """Load three trained XGBoost models."""
@@ -36,7 +41,10 @@ def load_models(model_dir='robust'):
     return models
 
 def generate_parameter_grid(bounds, density):
-    """Generate a fine parameter grid."""
+    """
+    Generate a fine parameter grid (k, fee, max_slippage).
+    Removed 'seed_encoded' feature.
+    """
     # Use log space for k (due to large range)
     k_log = np.linspace(np.log10(bounds['k'][0]), np.log10(bounds['k'][1]), density)
     k_values = 10 ** k_log
@@ -51,201 +59,35 @@ def generate_parameter_grid(bounds, density):
             grid_data.append({
                 'k': k,
                 'fee': fee,
-                'max_slippage': bounds['max_slippage'],
-                'seed_encoded': 0 
+                # 'max_slippage': bounds['max_slippage'],
+                # Removed 'seed_encoded': 0
             })
     
     return pd.DataFrame(grid_data), k_values, fee_values
 
 def calculate_coexistence_score(models, grid_df):
-    """Calculate the Coexistence Score."""
+    """
+    Calculate the Coexistence Score: Sigmoid(ΔDepth + ΔVolume) / (ε + exp(-ΔSpread)).
+    """
     # Prepare XGBoost input format
     dmatrix = xgb.DMatrix(grid_df)
     predictions = {}
     for target, model in models.items():
         predictions[target] = model.predict(dmatrix)
-    coexistence_scores = (predictions['depth_mean'] + predictions['volume_mean']) / \
-                         (1 + np.abs(predictions['spread_mean']))
+        
+    # 2. 计算分子 (Numerator)
+    # 分子 = ΔDepth + ΔVolume
+    coexistence_scores = predictions['depth_mean'] + predictions['volume_mean'] - predictions['spread_mean']
+    # 3. 计算分母 (Denominator)
     return coexistence_scores, predictions
-
-def plot_coexistence_surface(k_values, fee_values, scores, thresholds):
-    """
-    Draw the Coexistence Score as a 3D Surface Plot (Terrain Map).
-    
-    The plot uses log10(k) and fee as the X and Y axes, and Coexistence Score
-    as the Z-axis (height).
-    """
-    T1, T2 = thresholds
-    
-    # 1. Prepare data for 3D plot
-    # Reshape the 1D scores array back into the 2D grid matrix
-    score_matrix = scores.reshape(len(k_values), len(fee_values))
-    
-    # Create the meshgrid for X (fee) and Y (log10(k))
-    X, Y = np.meshgrid(fee_values, np.log10(k_values))
-    Z = score_matrix
-    
-    # 2. Setup the 3D plot
-    fig = plt.figure(figsize=(16, 12))
-    # Use '111' projection for standard 3D axes
-    ax = fig.add_subplot(111, projection='3d')
-    
-
-    # 3. Define the Colormap and Normalization
-    # Use a diverging colormap (like 'coolwarm') for score centered around 0
-    cmap = plt.cm.coolwarm
-    # Normalize the color mapping based on the minimum and maximum score
-    norm = plt.Normalize(Z.min(), Z.max())
-
-    # 4. Draw the 3D Surface Plot
-    surface = ax.plot_surface(
-        X, Y, Z, 
-        cmap=cmap, 
-        norm=norm,
-        linewidth=0, 
-        antialiased=True, # Smooth edges
-        alpha=0.8        # Make it slightly transparent for better viewing
-    )
-
-    # 5. Add Labels and Title
-    ax.set_title('3D Terrain Map of Coexistence Score Across Parameter Space', fontsize=18, pad=20)
-    ax.set_xlabel('Fee (fee)', fontsize=14, labelpad=15)
-    ax.set_ylabel(r'$\log_{10}(k)$ (Pool Size)', fontsize=14, labelpad=15)
-    ax.set_zlabel('Coexistence Score', fontsize=14, labelpad=15)
-
-    # Add a color bar
-    fig.colorbar(surface, shrink=0.6, aspect=20, label='Coexistence Score')
-
-    # Optional: Highlight the threshold planes (for T1 and T2)
-    # The planes can help visualize where the Low/Neutral/High zones are in 3D space
-    # ax.plot_surface(X, Y, np.ones_like(Z) * T1, color='green', alpha=0.3, label=f'T1 ({T1:.2f})')
-    # ax.plot_surface(X, Y, np.ones_like(Z) * T2, color='red', alpha=0.3, label=f'T2 ({T2:.2f})')
-    
-    # Optional: Adjust the viewing angle for better perspective
-    # 'elev' is the elevation (vertical angle), 'azim' is the azimuth (horizontal rotation)
-    ax.view_init(elev=25, azim=230) 
-    
-    plt.tight_layout()
-    plt.savefig('robust/coexistence_surface_plot.png', dpi=300, bbox_inches='tight')
-    plt.show()
-
 
 def calculate_adaptive_thresholds(scores, lower_percentile=45, upper_percentile=55):
     """
-    Calculate two adaptive thresholds:
-    T1 (lower_percentile): 45% of scores are below T1 (Low Coexistence).
-    T2 (upper_percentile): 55% of scores are below T2, meaning 45% are above T2 (High Coexistence).
-    10% of scores are between T1 and T2 (Critical/Neutral Zone).
+    Calculate two adaptive thresholds: T1 (lower_percentile) and T2 (upper_percentile).
     """
     T1 = np.percentile(scores, lower_percentile)
     T2 = np.percentile(scores, upper_percentile)
     return T1, T2
-
-def plot_coexistence_heatmap(k_values, fee_values, scores, thresholds, predictions):
-    """Draw the Coexistence Score heatmap, mask the low-score area, and highlight the neutral zone."""
-    T1, T2 = thresholds
-    score_matrix = scores.reshape(len(k_values), len(fee_values))
-    
-    # Use a slightly larger figure to accommodate labels and colorbar better
-    plt.figure(figsize=(14, 10)) 
-    
-    # 1. Define the Colormap (Diverging, centered at 0)
-    cmap = sns.diverging_palette(240, 10, as_cmap=True)
-    
-    # Pre-calculate tick labels
-    x_tick_labels = np.round(fee_values, 4)
-    y_tick_labels = np.round(np.log10(k_values), 1)
-    
-    # 2. Draw the main heatmap (Coexistence Score)
-    ax = sns.heatmap(
-        score_matrix,
-        cmap=cmap,
-        center=0,
-        annot=False,
-        fmt=".2f",
-        xticklabels=x_tick_labels,
-        yticklabels=y_tick_labels,
-        cbar_kws={'label': 'Coexistence Score'}
-    )
-    
-    # 3. Mask the Low Coexistence Area (Score < T1, bottom 45%)
-    low_coexistence_mask = score_matrix < T1
-    low_mask_color_rgba = (0.9, 0.9, 0.9, 0.7)
-    low_mask_color = ListedColormap([low_mask_color_rgba]) 
-    
-    sns.heatmap(
-        np.where(low_coexistence_mask, 1, np.nan),
-        cmap=low_mask_color,
-        cbar=False,
-        annot=False,
-        xticklabels=False,
-        yticklabels=False,
-        ax=ax
-    )
-
-    # 4. Highlight the Critical/Neutral Zone (T1 <= Score <= T2, middle 10%)
-    neutral_zone_mask = (score_matrix >= T1) & (score_matrix <= T2)
-    neutral_mask_color_rgba = (0.9, 0.7, 0.2, 0.3)
-    neutral_mask_color = ListedColormap([neutral_mask_color_rgba]) 
-    
-    sns.heatmap(
-        np.where(neutral_zone_mask, 1, np.nan),
-        cmap=neutral_mask_color,
-        cbar=False,
-        annot=False,
-        xticklabels=False,
-        yticklabels=False,
-        ax=ax
-    )
-    
-    # --- FIX 1: Restore Ticks/Labels (Crucial fix) ---
-    tick_locations = np.arange(len(x_tick_labels)) + 0.5 
-    ax.set_xticks(tick_locations)
-    ax.set_yticks(tick_locations)
-    ax.set_xticklabels(x_tick_labels, rotation=45, ha='right')
-    ax.set_yticklabels(y_tick_labels, rotation=0)
-
-    # Set labels and title
-    ax.set_title('Coexistence Score Heatmap Across Parameter Space', fontsize=15, pad=20)
-    ax.set_xlabel('Fee (fee)', fontsize=12)
-    ax.set_ylabel(r'$\log_{10}(k)$ (Pool Size)', fontsize=12)
-    
-    # --- FIX 2: Add Custom Legend (Positioned to avoid Cbar) ---
-    
-    # Create custom patches for the legend
-    low_patch = mpatches.Patch(
-        color=low_mask_color_rgba, 
-        label=f'Low Coexistence Zone (Score < {T1:.2f})'
-    )
-    neutral_patch = mpatches.Patch(
-        color=neutral_mask_color_rgba, 
-        label=f'Neutral Zone ({T1:.2f} $\leq$ Score $\leq$ {T2:.2f})'
-    )
-    # Use a color from the high end of the main colormap
-    high_patch = mpatches.Patch(
-        color=cmap(0.9), 
-        label=f'High Coexistence Zone (Score > {T2:.2f})'
-    )
-    
-    # Add legend to the plot, LOCATED INSIDE the plot area at 'upper left'
-    # This placement avoids the default right-side Colorbar.
-    plt.legend(
-        handles=[high_patch, neutral_patch, low_patch], 
-        loc='upper left', # Fixed position inside the plot area
-        title='Score Zones',
-        frameon=True, # Optional: Keep frame for visibility
-        fontsize=10 
-    )
-    
-    # Use standard tight_layout to adjust margins
-    plt.tight_layout() 
-    plt.savefig('robust/coexistence_heatmap_three_zones_v5_left_legend.png', dpi=300, bbox_inches='tight')
-    plt.show()
-    
-    critical_indices = np.where(neutral_zone_mask)
-    return critical_indices
-
-# ... (analyze_critical_points and main execution block remain the same)
 
 def analyze_critical_points(critical_indices, k_values, fee_values, scores, predictions):
     """Analyze and print information about the Critical/Neutral points."""
@@ -273,16 +115,134 @@ def analyze_critical_points(critical_indices, k_values, fee_values, scores, pred
         flat_idx = i * num_fee + j
         
         print(f"\nNeutral Point Sample {idx_num + 1}:")
-        print(f"  k: {k:.2e}, fee: {fee:.4f}")
-        print(f"  Coexistence Score: {scores[flat_idx]:.4f}")
-        print(f"  Predicted Depth Change: {predictions['depth_mean'][flat_idx]:.4f}")
-        print(f"  Predicted Spread Change: {predictions['spread_mean'][flat_idx]:.4f}")
-        print(f"  Predicted Volume Change: {predictions['volume_mean'][flat_idx]:.4f}")
+        print(f" k: {k:.2e}, fee: {fee:.4f}")
+        print(f" Coexistence Score: {scores[flat_idx]:.4f}")
+        print(f" Predicted Depth Change: {predictions['depth_mean'][flat_idx]:.4f}")
+        print(f" Predicted Spread Change: {predictions['spread_mean'][flat_idx]:.4f}")
+        print(f" Predicted Volume Change: {predictions['volume_mean'][flat_idx]:.4f}")
+
+# --- 通用 3D 绘图函数 ---
+
+def plot_3d_surface(k_values, fee_values, metric_scores, metric_name, color_map='viridis'):
+    """
+    Draw a 3D Surface Plot for a given metric.
+    X-axis: Fee (fee), Y-axis: log10(k) (Pool Size), Z-axis: Metric Score.
+    """
+    # 1. Prepare data for 3D plot
+    # Reshape the 1D scores array back into the 2D grid matrix
+    score_matrix = metric_scores.reshape(len(k_values), len(fee_values))
+    
+    # Create the meshgrid for X (fee) and Y (log10(k))
+    X, Y = np.meshgrid(fee_values, np.log10(k_values))
+    Z = score_matrix
+    
+    # 2. Setup the 3D plot
+    fig = plt.figure(figsize=(16, 12))
+    ax = fig.add_subplot(111, projection='3d')
+    
+    # 3. Define the Colormap and Normalization
+    cmap = plt.cm.get_cmap(color_map)
+    norm = plt.Normalize(Z.min(), Z.max())
+
+    # 4. Draw the 3D Surface Plot
+    surface = ax.plot_surface(
+        X, Y, Z, 
+        cmap=cmap, 
+        norm=norm,
+        linewidth=0, 
+        antialiased=True, 
+        alpha=0.9 
+    )
+
+    # 5. Add Labels and Title
+    title = f'3D Surface Map of Predicted {metric_name.replace("_mean", "").replace("_", " ").title()} Change (%)'
+    z_label = f'Predicted {metric_name.replace("_mean", "").replace("_", " ").title()} Change'
+    
+    ax.set_title(title, fontsize=28, pad=20)
+    ax.set_xlabel('Fee (fee)', fontsize=14, labelpad=15)
+    ax.set_ylabel(r'$\log_{10}(k)$ (Pool Size)', fontsize=14, labelpad=15)
+    ax.set_zlabel(f'{z_label} (%)', fontsize=14, labelpad=15)
+
+    # Add a color bar
+    fig.colorbar(surface, shrink=0.6, aspect=20, label=z_label)
+
+    # Optional: Adjust the viewing angle for better perspective
+    ax.view_init(elev=30, azim=210) 
+    
+    plt.tight_layout()
+    filename = f'robust/{metric_name}_surface_plot.png'
+    plt.savefig(filename, dpi=300, bbox_inches='tight')
+    plt.show() # Disabled for production environment
+    print(f"\n3D Surface Plot for '{metric_name}' saved to {filename}")
+
+# --- 新增 2D 横切面绘图函数 ---
+def plot_2d_slices(k_values, fee_values, metric_scores, metric_name, k_slice, fee_slice):
+    """
+    Draw two 2D slice plots for a given metric:
+    1. Z vs Fee at fixed log10(k) (closest value to k_slice)
+    2. Z vs log10(k) at fixed Fee (closest value to fee_slice)
+    """
+    # Reshape the 1D scores array back into the 2D grid matrix
+    score_matrix = metric_scores.reshape(len(k_values), len(fee_values))
+    metric_title = metric_name.replace("_mean", "").replace("_", " ").title()
+
+    # --- Slice 1: Fixed k, Z vs Fee ---
+    # Find the index closest to k_slice
+    k_log_values = np.log10(k_values)
+    target_k_log = np.log10(k_slice)
+    k_idx = np.argmin(np.abs(k_log_values - target_k_log))
+    k_actual = k_values[k_idx]
+    
+    k_slice_data = score_matrix[k_idx, :] # Row slice
+    
+    plt.figure(figsize=(12, 6))
+    plt.plot(fee_values, k_slice_data, marker='o', linestyle='-', color='b', markersize=4)
+    
+    # Mark the 0 line
+    plt.axhline(0, color='r', linestyle='--', linewidth=1.5, label='Zero Change Line')
+    
+    plt.title(f'2D Slice: {metric_title} vs. Fee at k $\\approx$ {k_actual:.2e}', fontsize=16)
+    plt.xlabel('Fee (fee)', fontsize=14)
+    plt.ylabel(f'Predicted {metric_title} Change (%)', fontsize=14)
+    plt.grid(True, linestyle=':', alpha=0.7)
+    plt.legend()
+    plt.tight_layout()
+    filename_k_slice = f'robust/{metric_name}_k{k_slice:.0e}_slice.png'
+    plt.savefig(filename_k_slice, dpi=300, bbox_inches='tight')
+    # plt.show() # Disabled for production environment
+    print(f"2D Slice Plot (Fixed k) for '{metric_name}' saved to {filename_k_slice}")
+
+
+    # --- Slice 2: Fixed Fee, Z vs log10(k) ---
+    # Find the index closest to fee_slice
+    fee_idx = np.argmin(np.abs(fee_values - fee_slice))
+    fee_actual = fee_values[fee_idx]
+    
+    fee_slice_data = score_matrix[:, fee_idx] # Column slice
+    
+    plt.figure(figsize=(12, 6))
+    plt.plot(k_log_values, fee_slice_data, marker='s', linestyle='-', color='g', markersize=4)
+    
+    # Mark the 0 line
+    plt.axhline(0, color='r', linestyle='--', linewidth=1.5, label='Zero Change Line')
+
+    plt.title(f'2D Slice: {metric_title} vs. $\log_{{10}}(k)$ at Fee $\\approx$ {fee_actual:.4f}', fontsize=16)
+    plt.xlabel(r'$\log_{10}(k)$ (Pool Size)', fontsize=14)
+    plt.ylabel(f'Predicted {metric_title} Change (%)', fontsize=14)
+    plt.grid(True, linestyle=':', alpha=0.7)
+    plt.legend()
+    plt.tight_layout()
+    filename_fee_slice = f'robust/{metric_name}_fee{fee_slice:.4f}_slice.png'
+    plt.savefig(filename_fee_slice, dpi=300, bbox_inches='tight')
+    # plt.show() # Disabled for production environment
+    print(f"2D Slice Plot (Fixed Fee) for '{metric_name}' saved to {filename_fee_slice}")
 
 
 # --- Execution Block Modification ---
 if __name__ == "__main__":
-    # ... (Model loading and grid generation remain the same)
+    # Make sure the 'robust' directory exists for saving files
+    os.makedirs('robust', exist_ok=True) 
+
     print("Loading models...")
     try:
         models = load_models()
@@ -292,10 +252,12 @@ if __name__ == "__main__":
         exit()
         
     print(f"Generating parameter grid (Density: {GRID_DENSITY}x{GRID_DENSITY})...")
+    # Call generate_parameter_grid without 'seed_encoded'
     grid_df, k_values, fee_values = generate_parameter_grid(PARAM_BOUNDS, GRID_DENSITY)
     
-    print("Calculating Coexistence Score...")
+    print("Calculating Coexistence Score and individual predictions...")
     scores, predictions = calculate_coexistence_score(models, grid_df)
+    predictions['Coexistence_Score'] = scores # Add score to predictions for easier looping
     
     print("Calculating adaptive thresholds (T1 and T2)...")
     THRESHOLDS = calculate_adaptive_thresholds(scores, lower_percentile=45, upper_percentile=55)
@@ -303,17 +265,26 @@ if __name__ == "__main__":
     print(f"Adaptive Threshold T1 (45th percentile): {T1:.2f}")
     print(f"Adaptive Threshold T2 (55th percentile): {T2:.2f}")
 
-    # **REPLACE Heatmap plotting with Surface Plotting**
-    print("Drawing Coexistence Score 3D Surface Plot...")
-    plot_coexistence_surface(k_values, fee_values, scores, THRESHOLDS)
-    
-    # NOTE: Since the 3D plot doesn't directly return a mask, 
-    # we need to recalculate the critical_indices for the analyze_critical_points function.
+    # List of all metrics to process
+    metrics_to_plot = {
+        'Liquidity_Score': {'scores': scores, 'cmap': 'coolwarm'},
+        'depth_mean': {'scores': predictions['depth_mean'], 'cmap': 'viridis'},
+        'spread_mean': {'scores': predictions['spread_mean'], 'cmap': 'seismic'},
+        'volume_mean': {'scores': predictions['volume_mean'], 'cmap': 'magma'}
+    }
+
+    for metric_name, data in metrics_to_plot.items():
+        # 1. Draw 3D Plot
+        print(f"\nDrawing 3D Surface Plot for '{metric_name}'...")
+        plot_3d_surface(k_values, fee_values, data['scores'], metric_name, color_map=data['cmap'])
+        
+        # 2. Draw 2D Slices
+        print(f"Drawing 2D Slice Plots for '{metric_name}'...")
+        plot_2d_slices(k_values, fee_values, data['scores'], metric_name, K_SLICE, FEE_SLICE)
+        print("-" * 50)
+        
+    # 分析中立区点 (Coexistence Score)
     score_matrix = scores.reshape(len(k_values), len(fee_values))
     neutral_zone_mask = (score_matrix >= T1) & (score_matrix <= T2)
     critical_indices = np.where(neutral_zone_mask)
-
-    # Analyze critical points (middle 10% zone)
     analyze_critical_points(critical_indices, k_values, fee_values, scores, predictions)
-    
-    print("\n3D Surface Plot saved to robust/coexistence_surface_plot.png")

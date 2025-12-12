@@ -184,7 +184,9 @@ agent_count, agents, agent_types = 0, [], []
 
 # Hyperparameters
 symbol = args.ticker
-starting_cash = 10000000  # Cash in this simulator is always in CENTS.
+constant = 1e13
+starting_cash = 1e8  # Cash in this simulator is always in CENTS.
+backstop_quantity = (constant - args.initial_k) / 1e7 # Cash in this simulator is always in CENTS.
 
 r_bar = args.r_bar
 sigma_n = r_bar / 10
@@ -301,9 +303,10 @@ agents.extend([AdaptiveMarketMakerAgent(id=j,
                                 skew_beta=args.mm_skew_beta,
                                 level_spacing=args.mm_level_spacing,
                                 spread_alpha=args.mm_spread_alpha,
-                                backstop_quantity=args.mm_backstop_quantity,
+                                backstop_quantity=backstop_quantity,
                                 log_orders=log_orders,
                                 subscribe_num_levels=10,
+                                last_mid=args.r_bar,
                                 random_state=np.random.RandomState(seed=np.random.randint(low=0, high=2 ** 32,
                                                                                           dtype='uint64')))
                for idx, j in enumerate(range(agent_count, agent_count + num_mm_agents))])

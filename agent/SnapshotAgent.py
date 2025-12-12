@@ -144,7 +144,7 @@ class SnapshotAgent(TradingAgent):
             volume = msg.body['transacted_volume']
             if self.hybrid:
                 # 成交量（最近 1 秒）
-                volume_cfmm = CFMMAgent.get_transacted_volume_static(self.symbol, '1s')
+                volume_cfmm = CFMMAgent.get_transacted_volume_static(self.symbol, '1s', self.currentTime)
                 self.logEvent('VOLUME', {
                     'timestamp': currentTime,
                     'volume': volume + volume_cfmm

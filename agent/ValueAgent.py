@@ -200,6 +200,7 @@ class ValueAgent(TradingAgent):
                 adjust_int = 0
             else:
                 adjust_int = np.random.randint( 0, self.depth_spread*spread )
+                # adjust_int = np.random.uniform( 0, self.depth_spread*spread )
                 #adjustment to the limit price, allowed to post inside the spread
                 #or deeper in the book as a passive order to maximize surplus
 
@@ -217,6 +218,7 @@ class ValueAgent(TradingAgent):
             p = r_T
 
         # Place the order
+        # check self.holdings
         self.placeLimitOrder(self.symbol, self.size, buy, p)
 
     def receiveMessage(self, currentTime, msg):

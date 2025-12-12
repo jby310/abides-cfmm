@@ -142,8 +142,14 @@ class NoiseAgent(TradingAgent):
         bid, bid_vol, ask, ask_vol = self.getKnownBidAsk(self.symbol)
 
         if buy_indicator and ask:
+            # Place the order
+            # check self.holdings
+            # size = min(self.holdings['CASH']/ask, self.size)
+            # self.placeLimitOrder(self.symbol, size, buy_indicator, ask)
             self.placeLimitOrder(self.symbol, self.size, buy_indicator, ask)
         elif not buy_indicator and bid:
+            # size = min(self.holdings[self.symbol], self.size) if self.symbol in self.holdings else 0
+            # self.placeLimitOrder(self.symbol, size, buy_indicator, bid)
             self.placeLimitOrder(self.symbol, self.size, buy_indicator, bid)
 
     # Internal state and logic specific to this agent subclass.

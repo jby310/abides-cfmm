@@ -16,7 +16,7 @@ class MarketOnlyAgent(TradingAgent):
     """
     
     def __init__(self, id, name, type, symbol, starting_cash=100000, 
-                 max_slippage=0.05, wake_up_freq='60s', min_trade_size=0,
+                 max_slippage=0.05, wake_up_freq='60s', min_trade_size=0.1,
                  log_orders=False, random_state=None, hybrid=False):
         
         super().__init__(id, name, type, starting_cash=starting_cash,
@@ -125,10 +125,7 @@ class MarketOnlyAgent(TradingAgent):
             log_print(f"MarketOnlyAgent {self.id}: Insufficient holdings for minimum trade size")
             return
         
-        # Execute trade following the detailed flow chart logic
         # 在每个时刻交易之前，判断是否需要重置CFMM池子。
-        # need_reset = CFMMAgent.check_cfmm_reset_needed(self.symbol)
-
         # 计算max(bid)是否大于min(ask)
         if self.hybrid:
             bid, bid_vol, ask, ask_vol = self.getKnownBidAsk(self.symbol, best=True)
@@ -452,4 +449,4 @@ class MarketOnlyAgent(TradingAgent):
     #     return pd.Timedelta(self.wake_up_freq)
 
     def getWakeFrequency(self):
-        return pd.Timedelta(self.random_state.randint(low=1, high=200), unit='s')
+        return pd.Timedelta(self.random_state.randint(low=20, high=200), unit='s')

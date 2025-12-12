@@ -10,17 +10,35 @@ def second_level_did(hybrid_path, original_path,
                      tol='500ms'):
     """
     逐秒差分 + 配对 t 检验（同一秒配对）
+    
+    过滤掉前两分钟的数据。
     """
     # 1. 读数据 → 统一秒级索引
     def _load_second_df(path):
         df = pd.read_pickle(path).reset_index()
-        df['EventTime'] = pd.to_datetime(df['EventTime']).dt.round('1s')
+        df['EventTime'] = pd.to_datetime(df['EventTime'])
+        df = df.set_index('EventTime').sort_index()
+    
+        # 筛选1小时数据（从第二条记录开始）
+        if len(df) >= 2:  # 确保有足够数据
+            start_time = df.index[1]
+        # --- 新增的过滤逻辑：过滤掉前两分钟的数据 ---
+        # 计算前两分钟的截止时间
+        two_minutes_later = start_time + pd.Timedelta(minutes=2)
+        # 过滤数据
+        df = df[(df.index >= two_minutes_later)]
+        df = df.reset_index()
+    
+        # -----------------------------------------------
+        
+        df['EventTime'] = df['EventTime'].dt.round('1s')
         return df.set_index('EventTime').sort_index()
 
     df_h = _load_second_df(hybrid_path)
     df_o = _load_second_df(original_path)
 
     # 2. 按秒聚合（过滤非字典类型的Event）
+    # ... (这一部分保持不变) ...
     agg_h = df_h.groupby('EventTime').agg(
         spread=('Event', lambda x: np.nanmean([
             e['spread'] for e in x 
@@ -129,7 +147,7 @@ def main():
         delta_df.to_csv(os.path.join(args.output_dir, 'second_did_delta.csv'))
         
         # 打印结果（可选）
-        print('=== 逐秒配对 t 检验 ===')
+        print('=== 逐秒配对 t 检验（已剔除前两分钟数据） ===')
         print('原始均值:')
         for m in ['spread', 'depth', 'volume']:
             print(
@@ -144,7 +162,8 @@ def main():
                 f'Δ{m.capitalize():<7}: '
                 f'均值={result[f"{m}_mean"]:.4f}, '
                 f't={result[f"{m}_t"]:6.2f}, '
-                f'p={result[f"{m}_p"]:.3g}'
+                f'p={result[f"{m}_p"]:.3g}, '
+                f'r={result[f"{m}_mean"]/mean_original[f'o_{m}']*100:.3g}%'
             )
         
         print(f"结果已保存到 {args.output_dir}")

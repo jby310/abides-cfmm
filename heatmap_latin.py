@@ -12,7 +12,7 @@ from scipy.stats import qmc
 plt.rcParams['font.sans-serif'] = ['SimHei']
 plt.rcParams['axes.unicode_minus'] = False
 
-IS_CONTROL_GROUP_RUN = True
+IS_CONTROL_GROUP_RUN = False
 
 class ExperimentRunner:
     def __init__(self, base_cmd):
@@ -21,7 +21,7 @@ class ExperimentRunner:
         self.control_group_run = IS_CONTROL_GROUP_RUN
         self.results_file = 'experiment_results.csv'
         self.existing_results = self.load_results_from_csv()
-        self.fixed_seeds = [1234, 121314, 91011, 5678]  # 固定的seed值
+        self.fixed_seeds = [12315]  # 固定的seed值
         
     def replace_parameter(self, cmd, param_name, param_value):
         """通用参数替换函数"""
@@ -143,7 +143,10 @@ class ExperimentRunner:
             return None
 
     def latin_hypercube_sampling(self, param_bounds, n_samples=32, exclude_combinations=None):
-        """使用scipy.stats.qmc进行连续参数空间的拉丁超立方采样（seed固定为四个值）"""
+        """使用scipy.stats.qmc进行连续参数空间的拉丁超立方采样（seed固定为四个值）
+        
+        ***修改：k, fee, max_slippage 均使用线性均匀采样。***
+        """
         # 从参数边界中移除seed，因为我们将单独处理它
         continuous_params = {k: v for k, v in param_bounds.items() if k != 'seed'}
         param_names = list(continuous_params.keys())
@@ -177,19 +180,12 @@ class ExperimentRunner:
             # 将[0,1]区间的样本映射到实际参数值
             for j in range(current_samples):
                 combination = {'seed': seed_value}
-                for k, param in enumerate(param_names):
+                for k_idx, param in enumerate(param_names):
                     lower_bound, upper_bound = continuous_params[param]
-                    sample_value = sample[j, k]
+                    sample_value = sample[j, k_idx]
                     
-                    if param == 'k' or param == 'fee':
-                        # k值和fee都使用对数均匀采样
-                        log_lower = np.log10(lower_bound)
-                        log_upper = np.log10(upper_bound)
-                        log_value = log_lower + sample_value * (log_upper - log_lower)
-                        value = 10 ** log_value
-                    else:
-                        # 其他参数使用线性均匀采样
-                        value = lower_bound + sample_value * (upper_bound - lower_bound)
+                    # ***修改：所有连续参数均使用线性均匀采样***
+                    value = lower_bound + sample_value * (upper_bound - lower_bound)
                     
                     combination[param] = value
                 combinations.append(combination)
@@ -204,17 +200,12 @@ class ExperimentRunner:
             
             for j in range(additional_needed):
                 combination = {'seed': self.fixed_seeds[0]}
-                for k, param in enumerate(param_names):
+                for k_idx, param in enumerate(param_names):
                     lower_bound, upper_bound = continuous_params[param]
-                    sample_value = sample[j, k]
+                    sample_value = sample[j, k_idx]
                     
-                    if param == 'k' or param == 'fee':
-                        log_lower = np.log10(lower_bound)
-                        log_upper = np.log10(upper_bound)
-                        log_value = log_lower + sample_value * (log_upper - log_lower)
-                        value = 10 ** log_value
-                    else:
-                        value = lower_bound + sample_value * (upper_bound - lower_bound)
+                    # ***修改：所有连续参数均使用线性均匀采样***
+                    value = lower_bound + sample_value * (upper_bound - lower_bound)
                     
                     combination[param] = value
                 combinations.append(combination)
@@ -257,7 +248,10 @@ class ExperimentRunner:
         return combinations[:n_samples]
 
     def generate_additional_combinations(self, param_bounds, n_needed, exclude_combinations, existing_combinations):
-        """生成额外的非重复组合（连续空间版本，seed固定）"""
+        """生成额外的非重复组合（连续空间版本，seed固定）
+        
+        ***修改：k, fee, max_slippage 均使用线性均匀采样。***
+        """
         additional_combinations = []
         attempts = 0
         max_attempts = n_needed * 20
@@ -273,15 +267,13 @@ class ExperimentRunner:
             
             for param, bounds in continuous_params.items():
                 lower, upper = bounds
-                if param == 'k' or param == 'fee':
-                    # k值和fee在对数空间均匀采样
-                    log_lower = np.log10(lower)
-                    log_upper = np.log10(upper)
-                    log_val = random.uniform(log_lower, log_upper)
-                    new_combo[param] = 10 ** log_val
+                
+                # ***修改：所有连续参数均使用线性均匀采样***
+                if lower == upper:
+                    new_combo[param] = lower # 如果范围相同，则固定为该值
                 else:
                     new_combo[param] = random.uniform(lower, upper)
-            
+
             # 检查是否重复（使用容差比较）
             is_duplicate = False
             
@@ -330,16 +322,13 @@ class ExperimentRunner:
             values = df[param]
             lower, upper = bounds
             
-            if param == 'k' or param == 'fee':
-                # 对k值和fee检查对数分布
-                log_values = np.log10(values)
-                log_lower = np.log10(lower)
-                log_upper = np.log10(upper)
-                coverage = (log_values.max() - log_values.min()) / (log_upper - log_lower) * 100
-                print(f"{param}: 对数空间覆盖 {coverage:.1f}% ({10**log_values.min():.2e} - {10**log_values.max():.2e})")
+            # ***修改：所有参数均检查线性分布***
+            if lower == upper:
+                 coverage = 100.0 # 固定值覆盖率为100%
+                 print(f"{param}: 固定值 {lower:.2e}")
             else:
                 coverage = (values.max() - values.min()) / (upper - lower) * 100
-                print(f"{param}: 线性空间覆盖 {coverage:.1f}% ({values.min():.4f} - {values.max():.4f})")
+                print(f"{param}: 线性空间覆盖 {coverage:.1f}% ({values.min():.2e} - {values.max():.2e})")
         
         # 显示seed分布
         seed_counts = df['seed'].value_counts().sort_index()
@@ -349,12 +338,8 @@ class ExperimentRunner:
         print("\n采样分布统计:")
         for param in continuous_params.keys():
             values = df[param]
-            if param == 'k' or param == 'fee':
-                # 对k值和fee显示对数统计
-                log_values = np.log10(values)
-                print(f"{param}: 对数均值={log_values.mean():.4f}, 对数标准差={log_values.std():.4f}, 范围=[{10**log_values.min():.2e}, {10**log_values.max():.2e}]")
-            else:
-                print(f"{param}: 均值={values.mean():.4f}, 标准差={values.std():.4f}, 范围=[{values.min():.4f}, {values.max():.4f}]")
+            # ***修改：显示线性统计***
+            print(f"{param}: 均值={values.mean():.4e}, 标准差={values.std():.4e}, 范围=[{values.min():.4e}, {values.max():.4e}]")
         
         print("=== 验证完成 ===\n")
         
@@ -451,15 +436,15 @@ class ExperimentRunner:
             print()
 
 def main():
-    base_cmd = """python -u abides.py -c rmsc03 -t ETH -d 20251110 -s 1235 -l rmsc03_two_hour --start-time 09:30:00 --end-time 09:40:00 --fundamental-file-path data/ETH1.xlsx 
-python -u abides.py -c rmsc04 -t ETH -d 20251110 -s 1235 -l rmsc04_two_hour --start-time 09:30:00 --end-time 09:40:00 -k 10000000 --fee 0.01 --max-slippage 0.1 --fundamental-file-path data/ETH1.xlsx
+    base_cmd = """python -u abides.py -c rmsc03 -t ETH -d 20251110 -s 12315 -l rmsc03_two_hour --start-time 09:30:00 --end-time 09:40:00 --num-hybrid-agents 100 --fundamental-file-path data/ETH1.xlsx --r-bar 3611.0
+python -u abides.py -c rmsc04 -t ETH -d 20251110 -s 12315 -l rmsc04_two_hour --start-time 09:30:00 --end-time 09:40:00 -k 1000000000 --fee 0.003 --max-slippage 0.05 --num-hybrid-agents 100 --fundamental-file-path data/ETH1.xlsx --r-bar 3611.0
 python ttest.py"""
     
     # 定义连续参数空间的上下界（不包含seed）
     param_bounds = {
-        'k': (1e9, 1e12),        # 资金池规模: 1e9 到 1e12
-        'fee': (0.0001, 0.1),     # 手续费: 0.05% 到 10%
-        'max_slippage': (0.01, 1.0),  # 最大滑点: 1% 到 100%
+        'k': (1e10, 1e11),      # 资金池规模: 1e10 到 1e11
+        'fee': (0.001, 0.01),   # 手续费: 0.001 到 0.01
+        'max_slippage': (0.05, 0.05), # 最大滑点: 固定为 0.05
     }
     
     runner = ExperimentRunner(base_cmd)
@@ -468,7 +453,7 @@ python ttest.py"""
     print(f"参数空间边界: {param_bounds}")
     print(f"固定seed值: {runner.fixed_seeds}")
     
-    n_samples = 64
+    n_samples = 128
     
     results_df = runner.run_latin_hypercube_sampling(param_bounds, n_samples)
     

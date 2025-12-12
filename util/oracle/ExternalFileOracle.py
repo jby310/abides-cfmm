@@ -47,7 +47,7 @@ class ExternalFileOracle:
                         new_series = pd.Series(fundamental_df['Price'].values, index=fundamental_df['Dates'])
                     except:
                         # 如果 csv 读取也失败，尝试读取 excel 文件 (BIT)
-                        fundamental_df = pd.read_excel(fundamental_file_path)
+                        fundamental_df = pd.read_excel(fundamental_file_path, engine='openpyxl')
                         # 读取Excel后，先过滤掉'Dates'列中值为"Dates"的行
                         fundamental_df = fundamental_df[fundamental_df['Dates'] != 'Dates']
                         # fundamental_df['Dates']除了第一行剩下的把前面的'去掉
