@@ -1,7 +1,7 @@
 # run abides
 # python -u abides.py -c rmsc03 -t ABM -d 20200603 -s 1234 -l rmsc03_two_hour
-python -u abides.py -c rmsc03 -t ETH -d 20251110 -s 1234 -l rmsc03_two_hour --start-time 09:30:00 --end-time 09:35:00 --num-hybrid-agents 100 --fundamental-file-path data/ETH1.xlsx --r-bar 3611.0
-python -u abides.py -c rmsc04 -t ETH -d 20251110 -s 1234 -l rmsc04_two_hour --start-time 09:30:00 --end-time 09:35:00 -k 50000000000 --fee 0.001 --max-slippage 0.05 --num-hybrid-agents 100 --fundamental-file-path data/ETH1.xlsx --r-bar 3611.0
+python -u abides.py -c rmsc03 -t ETH -d 20251110 -s 1234 -l rmsc03_two_hour --start-time 09:30:00 --end-time 09:50:00 --num-hybrid-agents 100 --fundamental-file-path data/ETH1.xlsx --r-bar 3611.0
+python -u abides.py -c rmsc04 -t ETH -d 20251110 -s 1234 -l rmsc04_two_hour --start-time 09:30:00 --end-time 09:50:00 -k 50000000000 --fee 0.001 --max-slippage 0.05 --num-hybrid-agents 100 --fundamental-file-path data/ETH1.xlsx --r-bar 3611.0
 python ttest.py
 python plot.py
 python threshold3D.py
@@ -11,8 +11,8 @@ python -u abides.py -c rmsc04 -t ETH -d 20251028 -s 5678 -l rmsc04_two_hour --st
 python ttest.py
 python plot.py
 
-python -u abides.py -c rmsc03 -t ETH -d 20251110 -s 1234 -l rmsc03_two_hour --start-time 09:30:00 --end-time 09:35:00 --num-hybrid-agents 100 --fundamental-file-path data/BNB.xlsx --r-bar 550.0
-python -u abides.py -c rmsc04 -t ETH -d 20251110 -s 12315 -l rmsc04_two_hour --start-time 09:30:00 --end-time 09:35:00 -k 9000000000 --fee 0.001 --max-slippage 0.05 --num-hybrid-agents 100 --fundamental-file-path data/BNB.xlsx --r-bar 550.0
+python -u abides.py -c rmsc03 -t ETH -d 20251110 -s 1234 -l rmsc03_two_hour --start-time 09:30:00 --end-time 09:50:00 --num-hybrid-agents 100 --fundamental-file-path data/BNB.xlsx --r-bar 550.0
+python -u abides.py -c rmsc04 -t ETH -d 20251110 -s 12315 -l rmsc04_two_hour --start-time 09:30:00 --end-time 09:50:00 -k 9000000000 --fee 0.001 --max-slippage 0.05 --num-hybrid-agents 100 --fundamental-file-path data/BNB.xlsx --r-bar 550.0
 python ttest.py
 python plot.py
 python threshold3D.py

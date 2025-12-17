@@ -25,8 +25,9 @@ sns.set_style("whitegrid")
 ORIGIN_COLS = ['original_spread_mean', 'original_depth_mean', 'original_volume_mean']
 TARGET_COLS = ['spread_mean', 'depth_mean', 'volume_mean']
 FEATURE_COLS = ['k', 'fee', 'seed', 'max_slippage']
-# 仅保留数值特征作为建模特征（移除max_slippage）
-MODELING_FEATURE_COLS = ['k', 'fee']
+# （移除max_slippage）
+# MODELING_FEATURE_COLS = ['k', 'fee']
+MODELING_FEATURE_COLS = ['max_slippage']
 
 # ========== 新增：为每个目标定制参数 ==========
 TARGET_PARAMS = {
@@ -39,7 +40,7 @@ TARGET_PARAMS = {
         # 'subsample': 0.9,
         # 'colsample_bytree': 0.8,
         # 'reg_lambda': 3,
-        # 'reg_alpha': 0.3,
+        'reg_alpha': 0.3,
         # 'learning_rate': 0.30,
         # 'n_estimators': 100,
         'random_state':12315,
@@ -53,7 +54,7 @@ TARGET_PARAMS = {
         # 'subsample': 0.8,
         # 'colsample_bytree': 0.8,
         # 'reg_lambda': 5,
-        # 'reg_alpha': 0.2,
+        'reg_alpha': 0.2,
         # 'learning_rate': 0.05,
         # 'n_estimators': 150
         'random_state':1234,
@@ -173,7 +174,7 @@ def train_single_xgboost(X, y_target, target_name):
     """
     # 分割数据
     X_train, X_test, y_train, y_test = train_test_split(
-        X, y_target, test_size=0.1, random_state=42, shuffle=True
+        X, y_target, test_size=0.3, random_state=42, shuffle=True
     )
     
     # 自定义XGBoost兼容的R²评估函数
@@ -547,9 +548,16 @@ def plot_correlation_heatmap(X_modeling, y, save_path='robust/correlation_heatma
     fig, ax = plt.subplots(figsize=(10, 8))
     
     mask = np.triu(np.ones_like(corr_matrix, dtype=bool))
-    sns.heatmap(corr_matrix, annot=True, cmap='coolwarm', center=0,
-                square=True, linewidths=0.5, cbar_kws={'shrink': 0.8},
-                fmt='.2f')
+    sns.heatmap(
+        corr_matrix, annot=True, cmap='coolwarm', center=0,
+        square=True, linewidths=0.5, cbar_kws={'shrink': 0.8},
+        fmt='.2f',
+        annot_kws={
+            'size': 14,  # 数字大小（可根据需要调整，比如12/14/16）
+            'weight': 'black',  # 可选：加粗数字，更醒目
+            'fontfamily': 'Arial'# 可选：使用无衬线字体，粗体效果更明显
+        }
+    )
     
     plt.title('Feature-Target Correlation Heatmap (k, fee only, Outliers Excluded)', fontsize=14, pad=20)
     plt.tight_layout()

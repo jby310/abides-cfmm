@@ -24,6 +24,7 @@ class MarketOnlyAgent(TradingAgent):
         
         self.symbol = symbol
         self.max_slippage = max_slippage
+        self.delta = 0.05
         self.wake_up_freq = wake_up_freq
         self.min_trade_size = min_trade_size
         
@@ -181,7 +182,7 @@ class MarketOnlyAgent(TradingAgent):
             log_print(f"MarketOnlyAgent {self.id}: No best prices available for trade")
             return 
         best_price = min([p for p in [clob_price, cfmm_price] if p is not None]) if is_buy_order else max([p for p in [clob_price, cfmm_price] if p is not None])
-        max_slippage_price = best_price * (1 + self.max_slippage) if is_buy_order else best_price * (1 - self.max_slippage)
+        max_slippage_price = best_price * (1 + self.delta) if is_buy_order else best_price * (1 - self.delta)
         
         if self.hybrid:
             if is_buy_order and cfmm_price > max_slippage_price:
